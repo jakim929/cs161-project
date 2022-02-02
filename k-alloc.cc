@@ -35,19 +35,34 @@ void* kalloc(size_t sz) {
     void* ptr = nullptr;
 
     // skip over reserved and kernel memory
-    auto range = physical_ranges.find(next_free_pa);
-    while (range != physical_ranges.end()) {
-        if (range->type() == mem_available) {
-            // use this page
-            ptr = pa2kptr<void*>(next_free_pa);
-            next_free_pa += PAGESIZE;
-            break;
-        } else {
-            // move to next range
-            next_free_pa = range->last();
-            ++range;
-        }
+    while (
+        next_free_pa < physical_ranges.limit() &&
+        physical_ranges.type(next_free_pa) != mem_available
+    ) {
+        next_free_pa += PAGESIZE;
     }
+    if (next_free_pa < physical_ranges.limit()) {
+        ptr = pa2kptr<void*>(next_free_pa);
+
+        next_free_pa += PAGESIZE;
+    }
+
+    // auto range = physical_ranges.find(next_free_pa);
+    // while (range != physical_ranges.end()) {
+    //     log_printf("%p is in [%p, %p) of type %d\n",
+    //        next_free_pa, range->first(), range->last(), range->type());
+
+    //     if (range->type() == mem_available) {
+    //         // use this page
+    //         ptr = pa2kptr<void*>(next_free_pa);
+    //         next_free_pa += PAGESIZE;
+    //         break;
+    //     } else {
+    //         // move to next range
+    //         next_free_pa = range->last();
+    //         ++range;
+    //     }
+    // }
 
     page_lock.unlock(irqs);
 
@@ -57,6 +72,12 @@ void* kalloc(size_t sz) {
         // initialize to `int3`
         memset(ptr, 0xCC, PAGESIZE);
     }
+
+    // log_printf("%p ", ptr);
+    // log_backtrace("/// ");
+
+    // log_printf("returning %p\n", ptr);
+
     return ptr;
 }
 

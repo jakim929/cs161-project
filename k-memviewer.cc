@@ -74,6 +74,8 @@ void memusage::refresh() {
 
     memset(v_, 0, (maxpa / PAGESIZE) * sizeof(*v_));
 
+    mark(ka2pa(v_), f_kernel);
+
     // mark kernel ranges of physical memory
     // We handle reserved ranges of physical memory separately.
     for (auto range = physical_ranges.begin();
@@ -85,6 +87,13 @@ void memusage::refresh() {
                  pa += PAGESIZE) {
                 mark(pa, f_kernel);
             }
+        }
+    }
+
+    for (int cpuid = 0; cpuid < ncpu; cpuid++) {
+        cpustate* cpu = &cpus[cpuid];
+        if (cpu->idle_task_) {
+            mark(ka2pa(cpu->idle_task_), f_kernel);
         }
     }
 
