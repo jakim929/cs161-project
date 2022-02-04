@@ -253,8 +253,55 @@ uintptr_t proc::syscall(regstate* regs) {
 //    Handle fork system call.
 
 int proc::syscall_fork(regstate* regs) {
-    (void) regs;
-    return E_NOSYS;
+    proc* child = knew<proc>();
+
+    pid_t pid = -1;
+
+    auto irqs = ptable_lock.lock();
+    for (int i = 1; i < NPROC; i++) {
+        if (ptable[i] == nullptr) {
+            pid = i;
+            break;
+        }
+    }
+    if (pid >= 0) {
+        ptable[pid] = child;
+    }
+    ptable_lock.unlock(irqs);    
+
+    if (pid < 0) {
+        return E_AGAIN;
+    }
+
+    x86_64_pagetable* child_pagetable = kalloc_pagetable();
+    if (!child_pagetable) {
+        return E_NOMEM;
+    }
+    
+    // copy over from parent pagetable
+    for (vmiter it(pagetable_, 0); it.low(); it.next()) {
+        if (it.user()) {
+            // CHANGE WHEN VARIABLE SIZE IS SUPPORTED
+            void* kp = kalloc(PAGESIZE);
+            if (vmiter(child_pagetable, it.va()).try_map(kp, it.perm()) < 0) {
+                return E_NOMEM;
+            }
+            memcpy(kp, (void*) it.va(), PAGESIZE);
+        }
+    }
+    
+    child->init_user(pid, child_pagetable);
+
+    // Copy parent registers into child struct proc
+    memcpy(child->regs_, regs, sizeof(regstate));
+
+    // Return 0 to child
+    child->regs_->reg_rax = 0;
+
+    // Enqueue process onto a CPU's run queue
+    cpus[pid % ncpu].enqueue(child);
+
+    return pid;
 }
 
 
