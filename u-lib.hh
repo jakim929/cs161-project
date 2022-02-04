@@ -309,6 +309,9 @@ pid_t sys_clone(int (*function)(void*), void* arg, char* stack_top);
     assert(false);
 }
 
+inline int sys_map_console(volatile void* addr) {
+    return make_syscall(SYSCALL_MAP_CONSOLE, reinterpret_cast<uintptr_t>(addr));
+}
 
 // dprintf(fd, format, ...)
 //    Construct a string from `format` and pass it to `sys_write(fd)`.

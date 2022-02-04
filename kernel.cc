@@ -228,6 +228,18 @@ uintptr_t proc::syscall(regstate* regs) {
         return bufcache::get().sync(drop);
     }
 
+    case SYSCALL_MAP_CONSOLE: {
+        uintptr_t addr = reinterpret_cast<uintptr_t>(regs->reg_rdi);
+        if (addr > VA_LOWMAX || (addr % PAGESIZE) != 0) {
+            return E_INVAL;
+        }
+
+        if (vmiter(this, addr).try_map(addr, PTE_PWU) < 0) {
+            return E_INVAL;
+        }
+        return 0;
+    }
+
     default:
         // no such system call
         log_printf("%d: no such system call %u\n", id_, regs->reg_rax);

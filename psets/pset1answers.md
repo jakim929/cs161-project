@@ -69,5 +69,27 @@ Then, iterating through the `cpustate` structs in `cpus`, I marked the `cpustate
     }
 ```
 
+C. Entry points
+
+kernel_entry
+exception_entry
+alt_exception_entry
+syscall_entry
+ap_entry
+
+
+kernel_start()
+proc::syscall()
+proc::exception()
+cpustate::schedule()
+cpustate::init_ap()
+proc::panic_nonrunnable()
+boot()
+
+
+
+
+
+
 Grading notes
 -------------

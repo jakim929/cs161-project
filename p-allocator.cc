@@ -29,6 +29,11 @@ void process_main() {
         round_down(rdrsp() - 1, PAGESIZE)
     );
 
+    sys_map_console(console);
+    for (int i = 0; i < CONSOLE_ROWS * CONSOLE_COLUMNS; ++i) {
+        console[i] = '*' | 0x5000;
+    }
+
     while (true) {
         if (rand(0, ALLOC_SLOWDOWN - 1) < p) {
             if (heap_top == stack_bottom || sys_page_alloc(heap_top) < 0) {
