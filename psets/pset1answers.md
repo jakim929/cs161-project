@@ -88,8 +88,49 @@ boot()
 
 
 
+D. 
 
+E.
 
+F.
+I tried two methods to cause stack overflow. First, I tried a too-deep recursion. Neither -Wstack-usage nor -fstack-usage were able to detect it. Second, I tried a large local variable array, which did over flow the stack. -Wstack-usage=4096 and -fstack-usage were able to detect this.
+
+For the large local variable, 
+-fstack-usage output
+`kernel.cc:260:5:int proc::syscall_nastyalloc(int)	4296	static
+`
+and 
+-Wstack-usage=4096 output
+`kernel.cc:260:5: warning: stack usage is 4296 bytes [-Wstack-usage=]
+`
+
+I placed a stack canary of a fixed value (stack_canary_) in the struct proc, at the end after every property. Since the kernel stack starts at the end of the struct proc and then grows towards the beginning of the struct proc, the first property to get corrupted is the stack_canary_.
+
+```
+struct __attribute__((aligned(4096))) proc {
+    enum pstate_t {
+        ps_blank = 0, ps_runnable = PROC_RUNNABLE, ps_faulted
+    };
+
+    // These four members must come first:
+    pid_t id_ = 0;                             // Process ID
+    regstate* regs_ = nullptr;                 // Process's current registers
+    yieldstate* yields_ = nullptr;             // Process's current yield state
+    std::atomic<int> pstate_ = ps_blank;       // Process state
+
+    x86_64_pagetable* pagetable_ = nullptr;    // Process's page table
+    uintptr_t recent_user_rip_ = 0;            // Most recent user-mode %rip
+#if HAVE_SANITIZERS
+    int sanitizer_status_ = 0;
+#endif
+
+    list_links runq_links_;
+
+    int stack_canary_ = STACK_CANARY_VALUE;
+    
+    ...other methods...
+}
+```
 
 Grading notes
 -------------

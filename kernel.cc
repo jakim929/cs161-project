@@ -159,7 +159,7 @@ void proc::exception(regstate* regs) {
 //    The return value from `proc::syscall()` is returned to the user
 //    process in `%rax`.
 
-uintptr_t proc::syscall(regstate* regs) {
+uintptr_t proc::run_syscall(regstate* regs) {
     //log_printf("proc %d: syscall %ld @%p\n", id_, regs->reg_rax, regs->reg_rip);
 
     // Record most recent user-mode %rip.
@@ -240,6 +240,9 @@ uintptr_t proc::syscall(regstate* regs) {
         return 0;
     }
 
+    case SYSCALL_NASTYALLOC:
+        return syscall_nastyalloc(1000);
+
     default:
         // no such system call
         log_printf("%d: no such system call %u\n", id_, regs->reg_rax);
@@ -248,6 +251,23 @@ uintptr_t proc::syscall(regstate* regs) {
     }
 }
 
+uintptr_t proc::syscall(regstate* regs) {
+    uintptr_t retval = run_syscall(regs);
+    assert(stack_canary_ == STACK_CANARY_VALUE);
+    return retval;
+}
+
+int proc::syscall_nastyalloc(int n) {
+    int test[1000];
+    for (int i = 0; i < 1000; i++) {
+        test[i] = i;
+    }
+    // if (n == 0) {
+    //     return n;
+    // }
+    // syscall_nastyalloc(n - 1);
+    return test[4];
+}
 
 // proc::syscall_fork(regs)
 //    Handle fork system call.
@@ -278,6 +298,9 @@ int proc::syscall_fork(regstate* regs) {
         return E_NOMEM;
     }
     
+    // Enable interrupts before copying data
+    sti();
+
     // copy over from parent pagetable
     for (vmiter it(pagetable_, 0); it.low(); it.next()) {
         if (it.user()) {

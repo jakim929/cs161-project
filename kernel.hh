@@ -14,6 +14,7 @@ struct yieldstate;
 struct proc_loader;
 struct elf_program;
 #define PROC_RUNNABLE 1
+#define STACK_CANARY_VALUE 3482
 
 
 // kernel.hh
@@ -41,6 +42,7 @@ struct __attribute__((aligned(4096))) proc {
 
     list_links runq_links_;
 
+    int stack_canary_ = STACK_CANARY_VALUE;
 
     proc();
     NO_COPY_OR_ASSIGN(proc);
@@ -54,6 +56,7 @@ struct __attribute__((aligned(4096))) proc {
     static int load(proc_loader& ld);
 
     void exception(regstate* reg);
+    uintptr_t run_syscall(regstate* reg);
     uintptr_t syscall(regstate* reg);
 
     void yield();
@@ -62,6 +65,8 @@ struct __attribute__((aligned(4096))) proc {
     [[noreturn]] void panic_nonrunnable();
 
     inline bool resumable() const;
+
+    int syscall_nastyalloc(int n);
 
     int syscall_fork(regstate* regs);
 

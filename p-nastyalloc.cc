@@ -1,5 +1,5 @@
 #include "u-lib.hh"
-#define ALLOC_SLOWDOWN 24
+#define ALLOC_SLOWDOWN 2
 
 extern uint8_t end[];
 
@@ -22,6 +22,10 @@ void process_main() {
     while (true) {
         // Add code to this loop to call your new, nasty system call
         // with some probability!
+
+        if (rand(0, 10) < 2) {
+            sys_nastyalloc();
+        }
 
         if (rand(0, ALLOC_SLOWDOWN - 1) < p) {
             if (heap_top == stack_bottom || sys_page_alloc(heap_top) < 0) {

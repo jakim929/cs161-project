@@ -285,6 +285,7 @@ struct bitset_view {
 // Your numbers should be >=128 to avoid conflicts.
 
 #define SYSCALL_MAP_CONSOLE     128
+#define SYSCALL_NASTYALLOC      129
 
 // System call error return values
 
