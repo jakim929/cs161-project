@@ -3,6 +3,7 @@
 
 static spinlock page_lock;
 static uintptr_t next_free_pa;
+buddyallocator allocator;
 
 
 // init_kalloc
@@ -10,6 +11,7 @@ static uintptr_t next_free_pa;
 //    after `physical_ranges` is initialized.
 void init_kalloc() {
     // do nothing for now
+    allocator.init();
 }
 
 
@@ -27,25 +29,28 @@ void init_kalloc() {
 //    The handout code does not free memory and allocates memory in units
 //    of pages.
 void* kalloc(size_t sz) {
-    if (sz == 0 || sz > PAGESIZE) {
+    if (sz == 0 || sz > (1 << BUDDY_ALLOCATOR_MAX_ORDER)) {
         return nullptr;
     }
 
     auto irqs = page_lock.lock();
     void* ptr = nullptr;
 
-    // skip over reserved and kernel memory
-    while (
-        next_free_pa < physical_ranges.limit() &&
-        physical_ranges.type(next_free_pa) != mem_available
-    ) {
-        next_free_pa += PAGESIZE;
-    }
-    if (next_free_pa < physical_ranges.limit()) {
-        ptr = pa2kptr<void*>(next_free_pa);
+    uintptr_t pa = allocator.allocate(sz);
+    ptr = pa2kptr<void*>(pa);
 
-        next_free_pa += PAGESIZE;
-    }
+    // skip over reserved and kernel memory
+    // while (
+    //     next_free_pa < physical_ranges.limit() &&
+    //     physical_ranges.type(next_free_pa) != mem_available
+    // ) {
+    //     next_free_pa += PAGESIZE;
+    // }
+    // if (next_free_pa < physical_ranges.limit()) {
+    //     ptr = pa2kptr<void*>(next_free_pa);
+
+    //     next_free_pa += PAGESIZE;
+    // }
 
     // auto range = physical_ranges.find(next_free_pa);
     // while (range != physical_ranges.end()) {
@@ -68,15 +73,10 @@ void* kalloc(size_t sz) {
 
     if (ptr) {
         // tell sanitizers the allocated page is accessible
-        asan_mark_memory(ka2pa(ptr), PAGESIZE, false);
+        asan_mark_memory(ka2pa(ptr), sz, false);
         // initialize to `int3`
-        memset(ptr, 0xCC, PAGESIZE);
+        memset(ptr, 0xCC, sz);
     }
-
-    // log_printf("%p ", ptr);
-    // log_backtrace("/// ");
-
-    // log_printf("returning %p\n", ptr);
 
     return ptr;
 }

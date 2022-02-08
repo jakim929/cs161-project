@@ -317,6 +317,10 @@ inline int sys_nastyalloc() {
     return make_syscall(SYSCALL_NASTYALLOC);
 }
 
+inline int sys_testkalloc() {
+    return make_syscall(SYSCALL_TESTKALLOC);
+}
+
 // dprintf(fd, format, ...)
 //    Construct a string from `format` and pass it to `sys_write(fd)`.
 //    Returns the number of characters printed, or E_2BIG if the string

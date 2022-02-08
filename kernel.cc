@@ -243,6 +243,9 @@ uintptr_t proc::run_syscall(regstate* regs) {
     case SYSCALL_NASTYALLOC:
         return syscall_nastyalloc(1000);
 
+    case SYSCALL_TESTKALLOC:
+        return syscall_testkalloc();
+
     default:
         // no such system call
         log_printf("%d: no such system call %u\n", id_, regs->reg_rax);
@@ -267,6 +270,24 @@ int proc::syscall_nastyalloc(int n) {
     // }
     // syscall_nastyalloc(n - 1);
     return test[4];
+}
+
+int proc::syscall_testkalloc() {
+    // assert(allocator.max_order_allocable(20480, 1000000) == 12);
+    // assert(allocator.max_order_allocable(20480, 20480 + 4096) == 12);
+    // assert(allocator.max_order_allocable(24576, 1000000) == 13);
+    // assert(allocator.max_order_allocable(24576, 24576 + 8192) == 13); 
+    // assert(allocator.max_order_allocable(24576, 24576 + 4096) == 12);
+    // assert(allocator.max_order_allocable(24576, 24576 + 1024) == 12);
+    assert(allocator.get_desired_order(4095) == 12);
+    assert(allocator.get_desired_order(4096) == 12);
+    assert(allocator.get_desired_order(4097) == 13);
+    assert(allocator.get_desired_order(15360) == 14);
+    assert(allocator.get_desired_order(1028) == 12);
+    assert(allocator.get_desired_order(1 << 20) == 20);
+    assert(allocator.get_desired_order((1 << 20) + 1) == 21);
+    assert(allocator.get_desired_order((1 << 20) - 1) == 20);
+    return 0;
 }
 
 // proc::syscall_fork(regs)
@@ -306,7 +327,7 @@ int proc::syscall_fork(regstate* regs) {
         if (it.user()) {
             // CHANGE WHEN VARIABLE SIZE IS SUPPORTED
             void* kp = kalloc(PAGESIZE);
-            if (vmiter(child_pagetable, it.va()).try_map(kp, it.perm()) < 0) {
+            if (!kp || vmiter(child_pagetable, it.va()).try_map(kp, it.perm()) < 0) {
                 return E_NOMEM;
             }
             memcpy(kp, (void*) it.va(), PAGESIZE);

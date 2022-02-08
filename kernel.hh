@@ -13,6 +13,7 @@ struct proc;
 struct yieldstate;
 struct proc_loader;
 struct elf_program;
+struct buddyallocator;
 #define PROC_RUNNABLE 1
 #define STACK_CANARY_VALUE 3482
 
@@ -67,6 +68,7 @@ struct __attribute__((aligned(4096))) proc {
     inline bool resumable() const;
 
     int syscall_nastyalloc(int n);
+    int syscall_testkalloc();
 
     int syscall_fork(regstate* regs);
 
@@ -302,6 +304,42 @@ inline T read_unaligned(const uint8_t* ptr, T (U::* member)) {
     return a;
 }
 
+#define BUDDY_ALLOCATOR_MIN_ORDER 12
+#define BUDDY_ALLOCATOR_MAX_ORDER 21
+
+extern buddyallocator allocator;
+
+struct pagestatus {
+    int order;
+    bool is_free;
+    list_links link_;
+};
+
+struct buddyallocator {
+    const int min_order_ = BUDDY_ALLOCATOR_MIN_ORDER;
+    const int max_order_ = BUDDY_ALLOCATOR_MAX_ORDER;
+    pagestatus pages_[MEMSIZE_PHYSICAL / PAGESIZE];
+    list<pagestatus, &pagestatus::link_> free_lists_[BUDDY_ALLOCATOR_MAX_ORDER - BUDDY_ALLOCATOR_MIN_ORDER + 1];
+
+    buddyallocator();
+    void init();
+    uintptr_t allocate(size_t size);
+    uintptr_t free(uintptr_t addr);
+
+//  private:
+    pagestatus* split_to_order(pagestatus* pg, int order);
+    int find_buddy_id(int page_id);
+    int find_buddy_id_for_order(int page_id, int order);
+    bool is_index_aligned(int page_id, int order);
+    int get_index_offset(int order);
+    int get_page_index(pagestatus* pg);
+    int get_pa(pagestatus* pg);
+    pagestatus* find_smallest_free(int order);
+    int get_desired_order(size_t size);
+    void init_range(uintptr_t start, uintptr_t end);
+    void init_reserved_range(uintptr_t start, uintptr_t end);
+    int max_order_allocable(uintptr_t start, uintptr_t end);
+};
 
 // kalloc(sz)
 //    Allocate and return a pointer to at least `sz` contiguous bytes

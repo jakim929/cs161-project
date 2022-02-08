@@ -5,5 +5,11 @@ void process_main() {
     // Running `testkalloc` should cause the kernel to run buddy allocator
     // tests. How you make this work is up to you.
 
-    panic("testkalloc not implemented!\n");
+    sys_consoletype(CONSOLE_MEMVIEWER);
+
+    while(true) {
+        sys_testkalloc();
+    }
+
+    sys_exit(0);
 }
