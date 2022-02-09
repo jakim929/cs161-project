@@ -77,7 +77,6 @@ alt_exception_entry
 syscall_entry
 ap_entry
 
-
 kernel_start()
 proc::syscall()
 proc::exception()
@@ -85,8 +84,6 @@ cpustate::schedule()
 cpustate::init_ap()
 proc::panic_nonrunnable()
 boot()
-
-
 
 D. 
 

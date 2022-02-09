@@ -1,5 +1,6 @@
 #include "kernel.hh"
 #include "k-vmiter.hh"
+#include "k-ahci.hh"
 
 // k-memviewer.cc
 //
@@ -88,6 +89,11 @@ void memusage::refresh() {
                 mark(pa, f_kernel);
             }
         }
+    }
+
+    uintptr_t sata_disk_ptr = reinterpret_cast<uintptr_t>(sata_disk);
+    for (uintptr_t ka = sata_disk_ptr; ka < sata_disk_ptr + (1 << msb(sizeof(ahcistate) - 1)); ka += PAGESIZE) {
+        mark(ka2pa(ka), f_kernel);
     }
 
     for (int cpuid = 0; cpuid < ncpu; cpuid++) {
