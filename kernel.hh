@@ -68,8 +68,8 @@ struct __attribute__((aligned(4096))) proc {
     inline bool resumable() const;
 
     int syscall_nastyalloc(int n);
-    int syscall_testkalloc();
-
+    int syscall_testkalloc(uintptr_t heap_top, uintptr_t stack_bottom, int mode);
+    int syscall_testfree(uintptr_t heap_top, uintptr_t stack_bottom);
     int syscall_fork(regstate* regs);
 
     uintptr_t syscall_read(regstate* reg);
@@ -324,21 +324,27 @@ struct buddyallocator {
     buddyallocator();
     void init();
     uintptr_t allocate(size_t size);
-    uintptr_t free(uintptr_t addr);
+    int free(uintptr_t addr);
 
 //  private:
     pagestatus* split_to_order(pagestatus* pg, int order);
+    void merge(pagestatus* pg);
+    pagestatus* merge_buddies(pagestatus* buddy1, pagestatus* buddy2);
     int find_buddy_id(int page_id);
     int find_buddy_id_for_order(int page_id, int order);
     bool is_index_aligned(int page_id, int order);
     int get_index_offset(int order);
-    int get_page_index(pagestatus* pg);
-    int get_pa(pagestatus* pg);
+    int pg2pi(pagestatus* pg);
+    uintptr_t pg2pa(pagestatus* pg);
+    int pa2pi(uintptr_t pa);
+    pagestatus* pa2pg(uintptr_t pa);
     pagestatus* find_smallest_free(int order);
     int get_desired_order(size_t size);
     void init_range(uintptr_t start, uintptr_t end);
     void init_reserved_range(uintptr_t start, uintptr_t end);
     int max_order_allocable(uintptr_t start, uintptr_t end);
+
+    bool is_pa_free(uintptr_t pa);
 };
 
 // kalloc(sz)

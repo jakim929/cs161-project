@@ -317,8 +317,12 @@ inline int sys_nastyalloc() {
     return make_syscall(SYSCALL_NASTYALLOC);
 }
 
-inline int sys_testkalloc() {
-    return make_syscall(SYSCALL_TESTKALLOC);
+inline int sys_testkalloc(void* heap_top, void* stack_bottom, uintptr_t mode) {
+    return make_syscall(SYSCALL_TESTKALLOC, reinterpret_cast<uintptr_t>(heap_top), reinterpret_cast<uintptr_t>(stack_bottom), reinterpret_cast<uintptr_t>(mode));
+}
+
+inline int sys_testfree(void* heap_top, void* stack_bottom) {
+    return make_syscall(SYSCALL_TESTFREE, reinterpret_cast<uintptr_t>(heap_top), reinterpret_cast<uintptr_t>(stack_bottom));
 }
 
 // dprintf(fd, format, ...)

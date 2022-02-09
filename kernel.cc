@@ -243,8 +243,18 @@ uintptr_t proc::run_syscall(regstate* regs) {
     case SYSCALL_NASTYALLOC:
         return syscall_nastyalloc(1000);
 
-    case SYSCALL_TESTKALLOC:
-        return syscall_testkalloc();
+    case SYSCALL_TESTKALLOC: {
+        uintptr_t heap_top = regs->reg_rdi;
+        uintptr_t stack_bottom = regs->reg_rsi;
+        uintptr_t mode = regs->reg_rdx;
+        return syscall_testkalloc(heap_top, stack_bottom, (int) mode);
+    }
+
+    case SYSCALL_TESTFREE: {
+        uintptr_t heap_top = regs->reg_rdi;
+        uintptr_t stack_bottom = regs->reg_rsi;
+        return syscall_testfree(heap_top, stack_bottom);
+    }
 
     default:
         // no such system call
@@ -272,21 +282,46 @@ int proc::syscall_nastyalloc(int n) {
     return test[4];
 }
 
-int proc::syscall_testkalloc() {
+int proc::syscall_testkalloc(uintptr_t heap_top, uintptr_t stack_bottom, int mode) {
     // assert(allocator.max_order_allocable(20480, 1000000) == 12);
     // assert(allocator.max_order_allocable(20480, 20480 + 4096) == 12);
     // assert(allocator.max_order_allocable(24576, 1000000) == 13);
     // assert(allocator.max_order_allocable(24576, 24576 + 8192) == 13); 
     // assert(allocator.max_order_allocable(24576, 24576 + 4096) == 12);
     // assert(allocator.max_order_allocable(24576, 24576 + 1024) == 12);
-    assert(allocator.get_desired_order(4095) == 12);
-    assert(allocator.get_desired_order(4096) == 12);
-    assert(allocator.get_desired_order(4097) == 13);
-    assert(allocator.get_desired_order(15360) == 14);
-    assert(allocator.get_desired_order(1028) == 12);
-    assert(allocator.get_desired_order(1 << 20) == 20);
-    assert(allocator.get_desired_order((1 << 20) + 1) == 21);
-    assert(allocator.get_desired_order((1 << 20) - 1) == 20);
+    // assert(allocator.get_desired_order(4095) == 12);
+    // assert(allocator.get_desired_order(4096) == 12);
+    // assert(allocator.get_desired_order(4097) == 13);
+    // assert(allocator.get_desired_order(15360) == 14);
+    // assert(allocator.get_desired_order(1028) == 12);
+    // assert(allocator.get_desired_order(1 << 20) == 20);
+    // assert(allocator.get_desired_order((1 << 20) + 1) == 21);
+    // assert(allocator.get_desired_order((1 << 20) - 1) == 20);
+    void* pg = kalloc(PAGESIZE * 2);
+    // if(pg != nullptr) log_printf("TESTKALLOC addr = %p => %p\n", heap_top, ka2pa(pg));
+
+    if (pg == nullptr || vmiter(this, heap_top).try_map(ka2pa(pg), PTE_PWU) < 0) {
+        return 0;
+    }
+
+    return 1;
+}
+
+int proc::syscall_testfree(uintptr_t heap_top, uintptr_t stack_bottom) {
+    log_printf("testing free\n");
+    int freed = 0;
+    for (vmiter it(pagetable_, 0); it.low(); it.next()) {
+        if (it.user() &&  it.va() >= heap_top && it.va() < stack_bottom) {
+            // if (it.va() == 0x400000) log_printf("syscall_testfree iterating %p => %p\n", it.va(), it.pa());
+
+            // CHANGE WHEN VARIABLE SIZE IS SUPPORTED
+            freed++;
+            it.kfree_page();
+        }
+  
+    }
+
+    log_printf("TROLL is free: %d order: %d DONE! %d\n", allocator.pa2pg(0x1a3000)->is_free, allocator.pa2pg(0x1a3000)->order, freed);
     return 0;
 }
 

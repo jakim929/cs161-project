@@ -2,9 +2,8 @@
 #include "k-lock.hh"
 
 static spinlock page_lock;
-static uintptr_t next_free_pa;
+// static uintptr_t next_free_pa;
 buddyallocator allocator;
-
 
 // init_kalloc
 //    Initialize stuff needed by `kalloc`. Called from `init_hardware`,
@@ -37,7 +36,7 @@ void* kalloc(size_t sz) {
     void* ptr = nullptr;
 
     uintptr_t pa = allocator.allocate(sz);
-    ptr = pa2kptr<void*>(pa);
+    ptr = pa == 0 ? nullptr: pa2kptr<void*>(pa);
 
     // skip over reserved and kernel memory
     // while (
@@ -86,11 +85,17 @@ void* kalloc(size_t sz) {
 //    Free a pointer previously returned by `kalloc`. Does nothing if
 //    `ptr == nullptr`.
 void kfree(void* ptr) {
-    if (ptr) {
-        // tell sanitizers the freed page is inaccessible
-        asan_mark_memory(ka2pa(ptr), PAGESIZE, true);
+    if (ptr == nullptr) {
+        return;
     }
-    log_printf("kfree not implemented yet\n");
+
+    auto irqs = page_lock.lock();
+
+    int order_freed = allocator.free(ka2pa(reinterpret_cast<uintptr_t>(ptr)));
+    
+    page_lock.unlock(irqs);
+    // tell sanitizers the freed page is inaccessible
+    asan_mark_memory(ka2pa(ptr), 1 << order_freed, true);
 }
 
 
