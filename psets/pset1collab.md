@@ -3,7 +3,10 @@ CS 161 Problem Set 1 Collaboration
 
 Collaborators
 -------------
-Raphael Rouvinov
+Raphael Rouvinov (primary)
+Jeffrey Xu
+Christopher Ong
+Felix Diener
 
 Citations
 ---------
