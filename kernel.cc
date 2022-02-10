@@ -271,10 +271,11 @@ uintptr_t proc::syscall(regstate* regs) {
 }
 
 int proc::syscall_nastyalloc(int n) {
-    int test[1000];
-    for (int i = 0; i < 1000; i++) {
+    int test[928];
+    for (int i = 0; i < 800; i++) {
         test[i] = i;
     }
+    // Recursive method
     // if (n == 0) {
     //     return n;
     // }
@@ -284,11 +285,13 @@ int proc::syscall_nastyalloc(int n) {
 
 int proc::syscall_testkalloc(uintptr_t heap_top, uintptr_t stack_bottom, int mode) {
     // assert(allocator.max_order_allocable(20480, 1000000) == 12);
+    // assert(allocator.max_order_allocable(20480, 1000000) == 12);
     // assert(allocator.max_order_allocable(20480, 20480 + 4096) == 12);
     // assert(allocator.max_order_allocable(24576, 1000000) == 13);
     // assert(allocator.max_order_allocable(24576, 24576 + 8192) == 13); 
     // assert(allocator.max_order_allocable(24576, 24576 + 4096) == 12);
     // assert(allocator.max_order_allocable(24576, 24576 + 1024) == 12);
+
     // assert(allocator.get_desired_order(4095) == 12);
     // assert(allocator.get_desired_order(4096) == 12);
     // assert(allocator.get_desired_order(4097) == 13);
@@ -297,9 +300,7 @@ int proc::syscall_testkalloc(uintptr_t heap_top, uintptr_t stack_bottom, int mod
     // assert(allocator.get_desired_order(1 << 20) == 20);
     // assert(allocator.get_desired_order((1 << 20) + 1) == 21);
     // assert(allocator.get_desired_order((1 << 20) - 1) == 20);
-    void* pg = kalloc(PAGESIZE * 2);
-    // if(pg != nullptr) log_printf("TESTKALLOC addr = %p => %p\n", heap_top, ka2pa(pg));
-
+    void* pg = kalloc(PAGESIZE);
     if (pg == nullptr || vmiter(this, heap_top).try_map(ka2pa(pg), PTE_PWU) < 0) {
         return 0;
     }

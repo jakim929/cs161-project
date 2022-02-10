@@ -38,7 +38,7 @@ CPPFLAGS := $(DEFS) -I.
 CCOMMONFLAGS := -m64 -mno-mmx -mno-sse -mno-sse2 -mno-sse3 \
 	-mno-3dnow -ffreestanding -fno-omit-frame-pointer -fno-pic \
 	-fno-stack-protector \
-	-Wall -W -Wshadow -Wno-format -Wno-unused-parameter -Wstack-usage=2048 -fstack-usage
+	-Wall -W -Wshadow -Wno-format -Wno-unused-parameter -Wstack-usage=3724 -fstack-usage
 
 ASFLAGS := $(CCOMMONFLAGS)
 ASFLAGS += $(shell $(CXX) -no-integrated-as -E -x c /dev/null >/dev/null 2>&1 && echo -no-integrated-as)

@@ -26,11 +26,11 @@ void buddyallocator::init() {
       ++range;
   }
 
-  // for(int i = 0; i < max_order_ - min_order_; i++) {
-  //   for (pagestatus* pg = free_lists_[i].front(); pg; pg = free_lists_[i].next(pg)) {
-  //     log_printf("%p [%d]\n", (pg - pages_) * PAGESIZE, pg->order);
-  //   }
-  // }
+  for(int i = 0; i < max_order_ - min_order_; i++) {
+    for (pagestatus* pg = free_lists_[i].front(); pg; pg = free_lists_[i].next(pg)) {
+      log_printf("%p [%d]\n", (pg - pages_) * PAGESIZE, pg->order);
+    }
+  }
 }
 
 uintptr_t buddyallocator::allocate(size_t size) {

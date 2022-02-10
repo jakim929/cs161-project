@@ -71,19 +71,32 @@ Then, iterating through the `cpustate` structs in `cpus`, I marked the `cpustate
 
 C. Entry points
 
-kernel_entry
 exception_entry
 alt_exception_entry
 syscall_entry
 ap_entry
 
-kernel_start()
-proc::syscall()
-proc::exception()
-cpustate::schedule()
-cpustate::init_ap()
-proc::panic_nonrunnable()
-boot()
+1. kernel_start() k-exception.S line 35
+The bootloader first loads the kernel then enters the kernel entry section. The assembly initializes the kernel CPU state in the empty space at the top of the first struct cpustate. Then it sets the registers to initial function parameters before jmp to the c++ kernel_start function.
+
+2. proc::syscall() k-exception.S line 228
+When entering a syscall, the kernel goes from user mode to kernel mode. First, the assembly code pushes the current register values into the stack. Then, since the first function parameter proc::syscall(regstate) is 'this' (the struct proc), it pushes the struct proc address into the first param %rdi. Then it pushes the top of the stack (which contains the saved regstate, which was just pushed onto the stack) into %rsi, the second param. Then it calls the proc::syscall function.
+
+3. proc::exception() k-exception.S line 143
+In exception_entry_finish, the assembly code pushes the current register values into the stack, forming regstate. Then it moves the first and second arguments (1. 'this' struct proc, 2. regstate) into rdi and rsi.
+
+4. cpustate::schedule() k-exception.S line 293
+This is called in _ZN4proc14yield_noreturnEv, which is called as part of _ZN4proc5yieldEv. When a process yields, it the assembly code first pushes the callee saved registers and rflags into the stack. Then, it moves into the kernel cpu stack by using the %gs register. Then it updates %rsp to the kernel stack, then calls the cpustate::schedule C++ function.
+
+5. cpustate::init_ap() k-exception.S line 485
+This initializes a new cpu available to run tasks by incrementing the ncpu count, moving to the kernel cpu stack, then calling cpustat::init_ap()
+
+6. proc::panic_nonrunnable() k-exception.S line 249
+
+7. assert_fail() k-exception.S line 345
+
+8. boot() bootentry.S line 106
+In real_to_prot, the OS is running, and then trying to switch from real mode to protected mode. In the process, it turns on 64bit, turns on protected mode, loads GDT, then calls the boot() function.
 
 D. 
 
@@ -97,9 +110,10 @@ For the large local variable,
 `kernel.cc:260:5:int proc::syscall_nastyalloc(int)	4296	static
 `
 and 
--Wstack-usage=4096 output
-`kernel.cc:260:5: warning: stack usage is 4296 bytes [-Wstack-usage=]
+-Wstack-usage=3724 output
+`kernel.cc:260:5: warning: stack usage is 3728 bytes [-Wstack-usage=]
 `
+From checking what stack size starts overflowing the stack, I found that 3728 is when the stack canary gets triggered.
 
 I placed a stack canary of a fixed value (stack_canary_) in the struct proc, at the end after every property. Since the kernel stack starts at the end of the struct proc and then grows towards the beginning of the struct proc, the first property to get corrupted is the stack_canary_.
 
@@ -128,6 +142,8 @@ struct __attribute__((aligned(4096))) proc {
     ...other methods...
 }
 ```
+
+G. In added asserts to my buddyallocator, and in my testkalloc , testfree syscalls, I allocate up to the limit (from heap_top to stack_bottom), then when memory is full, free all of the allocated pages. I repeat this with multiple processes.
 
 Grading notes
 -------------
