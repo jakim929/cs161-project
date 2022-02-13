@@ -71,6 +71,7 @@ struct __attribute__((aligned(4096))) proc {
     int syscall_testkalloc(uintptr_t heap_top, uintptr_t stack_bottom, int mode);
     int syscall_testfree(uintptr_t heap_top, uintptr_t stack_bottom);
     int syscall_fork(regstate* regs);
+    int syscall_exit(regstate* regs);
 
     uintptr_t syscall_read(regstate* reg);
     uintptr_t syscall_write(regstate* reg);
@@ -345,6 +346,7 @@ struct buddyallocator {
     int max_order_allocable(uintptr_t start, uintptr_t end);
 
     bool is_pa_free(uintptr_t pa);
+    bool is_allocated_block(uintptr_t pa);
 };
 
 // kalloc(sz)

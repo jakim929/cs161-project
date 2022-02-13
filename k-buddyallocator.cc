@@ -216,3 +216,8 @@ int buddyallocator::max_order_allocable(uintptr_t start, uintptr_t end) {
   assert(start % (1 << max_aligned_order) == 0);
   return min(max_size_order, max_aligned_order, max_order_);
 }
+
+bool buddyallocator::is_allocated_block(uintptr_t pa) {
+  pagestatus* pg = pa2pg(pa);
+  return !pg->is_free && pg->order >= min_order_ && pg->order <= max_order_;
+}
