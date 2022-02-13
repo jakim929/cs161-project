@@ -205,8 +205,11 @@ uintptr_t proc::run_syscall(regstate* regs) {
         return 0;
     }
 
-    case SYSCALL_EXIT:
-        return syscall_exit(regs);
+    case SYSCALL_EXIT: {
+        syscall_exit(regs);
+        // should never reach
+        assert(false);
+    }
 
     case SYSCALL_FORK:
         return syscall_fork(regs);
@@ -312,16 +315,12 @@ int proc::syscall_testkalloc(uintptr_t heap_top, uintptr_t stack_bottom, int mod
 }
 
 int proc::syscall_testfree(uintptr_t heap_top, uintptr_t stack_bottom) {
-    int freed = 0;
     for (vmiter it(pagetable_, 0); it.low(); it.next()) {
         if (it.user() &&  it.va() >= heap_top && it.va() < stack_bottom) {
             // CHANGE WHEN VARIABLE SIZE IS SUPPORTED
-            freed++;
             it.kfree_page();
         }
     }
-
-    log_printf("TROLL is free: %d order: %d DONE! %d\n", allocator.pa2pg(0x1a3000)->is_free, allocator.pa2pg(0x1a3000)->order, freed);
     return 0;
 }
 
@@ -339,7 +338,7 @@ int proc::syscall_fork(regstate* regs) {
     if (child == nullptr) {
         log_printf("fork_failed: child == nullptr \n");
         error_code = E_NOMEM;
-        goto bad_fork_free_proc;
+        goto bad_fork_return;
     }
 
     irqs = ptable_lock.lock();
@@ -373,13 +372,21 @@ int proc::syscall_fork(regstate* regs) {
     // copy over from parent pagetable
     for (vmiter it(pagetable_, 0); it.low(); it.next()) {
         if (it.user()) {
-            // CHANGE WHEN VARIABLE SIZE IS SUPPORTED
-            void* kp = kalloc(PAGESIZE);
-            if (kp == nullptr || vmiter(child_pagetable, it.va()).try_map(kp, it.perm()) < 0) {
-                error_code = E_NOMEM;
-                goto bad_fork_free_mem;
+            if (it.va() == (uintptr_t) console) {
+                // Map console to the same PA
+                vmiter(child_pagetable, it.va()).try_map(it.pa(), it.perm());
+            } else {
+                // CHANGE WHEN VARIABLE SIZE IS SUPPORTED
+                void* kp = kalloc(PAGESIZE);
+                if (kp == nullptr || vmiter(child_pagetable, it.va()).try_map(kp, it.perm()) < 0) {
+                    if (kp != nullptr) {
+                        kfree(kp);
+                    }
+                    error_code = E_NOMEM;
+                    goto bad_fork_free_mem;
+                }
+                memcpy(kp, (void*) it.va(), PAGESIZE);
             }
-            memcpy(kp, (void*) it.va(), PAGESIZE);
         }
     }
     
@@ -398,38 +405,49 @@ int proc::syscall_fork(regstate* regs) {
 
     bad_fork_free_mem: {
         assert(child_pagetable != nullptr);
-        for (vmiter it(child_pagetable, 0); it.low(); it.next()) {
-            if (it.user()) {
-                it.kfree_page();
-            }
-        }
+        kfree_all_user_mappings(child_pagetable);
+        kfree_pagetable(child_pagetable);
+        child_pagetable = nullptr;
     }
 
-    assert(child_pagetable != nullptr);
-    kfree(child_pagetable);
-
     bad_fork_free_pid: {
+        assert(child_pagetable == nullptr);
         assert(pid > 0);
         irqs = ptable_lock.lock();
         ptable[pid] = nullptr;
         ptable_lock.unlock(irqs);    
+        pid = -1;
     }
 
     bad_fork_free_proc: {
+        assert(pid < 0);
         assert(child != nullptr);
         kfree(child);
+        child = nullptr;
     }
 
+    bad_fork_return: {
+        assert(child == nullptr);
+    }
+    
     return error_code;
 }
 
-int proc::syscall_exit(regstate* regs) {
-    // for (vmiter it(pagetable_, 0); it.low(); it.next()) {
-    //     // CHANGE WHEN VARIABLE SIZE IS SUPPORTED
-    //     it.kfree_page();
-    // }
+void proc::syscall_exit(regstate* regs) {
+    // Remove current process from process table
+    auto irqs = ptable_lock.lock();
+    ptable[id_] = nullptr;
+    ptable_lock.unlock(irqs);
 
-    return 0;
+    x86_64_pagetable* original_pagetable = pagetable_;
+    set_pagetable(early_pagetable);
+    kfree_all_user_mappings(original_pagetable);
+    kfree_pagetable(original_pagetable);
+    pagetable_ = early_pagetable;
+
+    pstate_ = ps_blank;
+
+    yield_noreturn();
 }
 
 

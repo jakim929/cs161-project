@@ -71,7 +71,7 @@ struct __attribute__((aligned(4096))) proc {
     int syscall_testkalloc(uintptr_t heap_top, uintptr_t stack_bottom, int mode);
     int syscall_testfree(uintptr_t heap_top, uintptr_t stack_bottom);
     int syscall_fork(regstate* regs);
-    int syscall_exit(regstate* regs);
+    void syscall_exit(regstate* regs);
 
     uintptr_t syscall_read(regstate* reg);
     uintptr_t syscall_write(regstate* reg);
@@ -327,7 +327,7 @@ struct buddyallocator {
     uintptr_t allocate(size_t size);
     int free(uintptr_t addr);
 
-//  private:
+ private:
     pagestatus* split_to_order(pagestatus* pg, int order);
     void merge(pagestatus* pg);
     pagestatus* merge_buddies(pagestatus* buddy1, pagestatus* buddy2);
@@ -361,6 +361,9 @@ void* kalloc(size_t sz) __attribute__((malloc));
 //    Free a pointer previously returned by `kalloc`. Does nothing if
 //    `ptr == nullptr`.
 void kfree(void* ptr);
+
+void kfree_all_user_mappings(x86_64_pagetable* pt);
+void kfree_pagetable(x86_64_pagetable* pt);
 
 // operator new, operator delete
 //    Expressions like `new (std::nothrow) T(...)` and `delete x` work,

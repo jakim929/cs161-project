@@ -40,7 +40,7 @@ uintptr_t buddyallocator::allocate(size_t size) {
     for(int i = desired_order; i < max_order_ - min_order_; i++) {
       assert(free_lists_[i].empty());
     }
-    log_printf("Out of memory!");
+    log_printf("Out of memory!\n");
     // Out of memory
     return 0;
   }
@@ -58,6 +58,8 @@ int buddyallocator::free(uintptr_t addr) {
   int order = pg->order;
   free_lists_[pg->order - min_order_].push_back(pg);
   merge(pg);
+  assert(pg->is_free);
+  assert(pg->order >= order || pg->order == 0);
   return order;
 }
 
@@ -79,6 +81,7 @@ pagestatus* buddyallocator::split_to_order(pagestatus* pg, int order) {
 
   pagestatus* buddy = &pages_[buddy_id];
   assert(!buddy->link_.is_linked());
+  assert(buddy->order == 0);
   buddy->order = pg->order;
   buddy->is_free = true;
   free_lists_[buddy->order - min_order_].push_back(buddy);
@@ -121,6 +124,7 @@ pagestatus* buddyallocator::merge_buddies(pagestatus* buddy1, pagestatus* buddy2
   buddy2->link_.erase();
   buddy2->order = 0;
   free_lists_[buddy1->order - min_order_].push_back(buddy1);
+  assert(buddy1->is_free == true);
   return buddy1;
 }
 

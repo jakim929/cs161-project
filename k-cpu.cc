@@ -1,5 +1,6 @@
 #include "kernel.hh"
 #include "k-apic.hh"
+#include "k-vmiter.hh"
 
 cpustate cpus[MAXCPU];
 int ncpu;
@@ -78,6 +79,11 @@ void cpustate::schedule(proc* yielding_from) {
     assert(contains(rdrsp()));     // running on CPU stack
     assert(is_cli());              // interrupts are currently disabled
     assert(spinlock_depth_ == 0);  // no spinlocks are held
+
+    // Exited processes (pstate_ == ps_blank)
+    if (yielding_from->pstate_ == 0) {
+        kfree(yielding_from);
+    }
 
     // initialize idle task
     if (!idle_task_) {

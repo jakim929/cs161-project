@@ -14,6 +14,7 @@ void process_main() {
 
     (void) sys_fork();
     (void) sys_fork();
+
     heap_top = reinterpret_cast<uint8_t*>(
         round_up(reinterpret_cast<uintptr_t>(end), PAGESIZE)
     );
@@ -26,20 +27,34 @@ void process_main() {
         for (uint8_t* addr = heap_top ; addr < stack_bottom; addr += PAGESIZE) {
             if (addr != (uint8_t*) 0x200000) {
                 if (sys_testkalloc(addr, 0, 0) == 0) {
-                    break;
+                    sys_testfree(heap_top, stack_bottom);
+                    sys_yield();
+
                 }
             }
 
         }
-        sys_testfree(heap_top, stack_bottom);
-
-        // ASKTF: 0x200000 maps to 0x400000?
-        // sys_testkalloc((void*) 0x200000, 0, 0);
-        // sys_testfree((void*) 0x200000, (void*) 0x201000);
-
-        sys_yield();
         sys_pause();
     }
+
+    // while(true) {
+    //     for (uint8_t* addr = heap_top ; addr < stack_bottom; addr += PAGESIZE) {
+    //         if (addr != (uint8_t*) 0x200000) {
+    //             if (sys_testkalloc(addr, 0, 0) == 0) {
+    //                 break;
+    //             }
+    //         }
+
+    //     }
+    //     sys_testfree(heap_top, stack_bottom);
+
+    //     // ASKTF: 0x200000 maps to 0x400000?
+    //     // sys_testkalloc((void*) 0x200000, 0, 0);
+    //     // sys_testfree((void*) 0x200000, (void*) 0x201000);
+
+    //     sys_yield();
+    //     sys_pause();
+    // }
 
     sys_exit(0);
 }

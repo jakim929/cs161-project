@@ -1,5 +1,6 @@
 #include "kernel.hh"
 #include "k-lock.hh"
+#include "k-vmiter.hh"
 
 static spinlock page_lock;
 // static uintptr_t next_free_pa;
@@ -12,7 +13,6 @@ void init_kalloc() {
     // do nothing for now
     allocator.init();
 }
-
 
 // kalloc(sz)
 //    Allocate and return a pointer to at least `sz` contiguous bytes of
@@ -92,12 +92,38 @@ void kfree(void* ptr) {
     auto irqs = page_lock.lock();
 
     int order_freed = allocator.free(ka2pa(reinterpret_cast<uintptr_t>(ptr)));
-    
+
     page_lock.unlock(irqs);
     // tell sanitizers the freed page is inaccessible
     asan_mark_memory(ka2pa(ptr), 1 << order_freed, true);
 }
 
+// kfree_all(x86)
+//    Frees all user-accessible memory pointed to in pagetable
+//    TODO: update to delete multiple page sizes.
+//          currently only support PAGESIZE since
+void kfree_all_user_mappings(x86_64_pagetable* pt) {
+    for (vmiter it(pt, 0); it.low(); it.next()) {
+        // it.kfree_page();
+        if (it.present() && !it.user()) {
+            assert(false);
+            // log_printf("STRANGER THINGS\n");
+        }
+        if (it.user()) {
+            // Don't free page if mapped to console
+            if (it.va() != (uintptr_t) console) {
+                it.kfree_page();
+            }
+        }
+    }
+}
+
+void kfree_pagetable(x86_64_pagetable* pt) {
+    for (ptiter it(pt); it.low(); it.next()) {
+        it.kfree_ptp();
+    }
+    kfree(pt);
+}
 
 // operator new, operator delete
 //    Expressions like `new (std::nothrow) T(...)` and `delete x` work,

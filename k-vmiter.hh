@@ -87,6 +87,8 @@ class vmiter {
     inline void map(void* kptr, int perm);
     inline void map(volatile void* kptr, int perm);
 
+    inline void unmap();
+
     // Free mapped page and clear mapping. Like `kfree(kptr()); map(0, 0)`
     inline void kfree_page();
 
