@@ -63,6 +63,8 @@ void boot_process_start(pid_t pid, const char* name) {
     vmiter(p, MEMSIZE_VIRTUAL - PAGESIZE).map(stkpg, PTE_PWU);
     p->regs_->reg_rsp = MEMSIZE_VIRTUAL;
 
+    vmiter(p, 0xB8000).map(0xB8000, PTE_PWU);
+
     // add to process table (requires lock in case another CPU is already
     // running processes)
     {
@@ -246,6 +248,9 @@ uintptr_t proc::run_syscall(regstate* regs) {
         return 0;
     }
 
+    case SYSCALL_MSLEEP:    
+        return syscall_msleep(regs);
+
     case SYSCALL_NASTYALLOC:
         return syscall_nastyalloc(1000);
 
@@ -324,6 +329,14 @@ int proc::syscall_testfree(uintptr_t heap_top, uintptr_t stack_bottom) {
     return 0;
 }
 
+int proc::syscall_msleep(regstate* regs) {
+    uint64_t end_time = (uint64_t) ticks.load() + round_up(regs->reg_rdi, 10) / 100;
+    while(ticks.load() < end_time) {
+        yield();
+    }
+    return 0;
+}
+
 // proc::syscall_fork(regs)
 //    Handle fork system call.
 
@@ -374,6 +387,8 @@ int proc::syscall_fork(regstate* regs) {
         if (it.user()) {
             if (it.va() == (uintptr_t) console) {
                 // Map console to the same PA
+                vmiter(child_pagetable, it.va()).try_map(it.pa(), it.perm());
+            } else if (it.va() == 0xB8000 && it.pa() == 0xB8000) {
                 vmiter(child_pagetable, it.va()).try_map(it.pa(), it.perm());
             } else {
                 // CHANGE WHEN VARIABLE SIZE IS SUPPORTED
@@ -440,8 +455,8 @@ void proc::syscall_exit(regstate* regs) {
     ptable_lock.unlock(irqs);
 
     x86_64_pagetable* original_pagetable = pagetable_;
-    set_pagetable(early_pagetable);
     kfree_all_user_mappings(original_pagetable);
+    set_pagetable(early_pagetable);
     kfree_pagetable(original_pagetable);
     pagetable_ = early_pagetable;
 

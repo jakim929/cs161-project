@@ -54,6 +54,8 @@ uintptr_t buddyallocator::allocate(size_t size) {
 
 int buddyallocator::free(uintptr_t addr) {
   pagestatus* pg = pa2pg(addr);
+  assert(!pg->is_free);
+  // assert(pg->order != 0);
   pg->is_free = true;
   int order = pg->order;
   free_lists_[pg->order - min_order_].push_back(pg);

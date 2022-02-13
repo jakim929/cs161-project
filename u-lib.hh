@@ -133,7 +133,7 @@ inline pid_t sys_fork() {
 // sys_msleep(msec)
 //    Block for approximately `msec` milliseconds.
 inline int sys_msleep(unsigned msec) {
-    return E_NOSYS;
+    return make_syscall(SYSCALL_MSLEEP, msec);
 }
 
 // sys_getppid()

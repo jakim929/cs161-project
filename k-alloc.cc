@@ -104,14 +104,15 @@ void kfree(void* ptr) {
 //          currently only support PAGESIZE since
 void kfree_all_user_mappings(x86_64_pagetable* pt) {
     for (vmiter it(pt, 0); it.low(); it.next()) {
-        // it.kfree_page();
         if (it.present() && !it.user()) {
             assert(false);
-            // log_printf("STRANGER THINGS\n");
         }
         if (it.user()) {
             // Don't free page if mapped to console
-            if (it.va() != (uintptr_t) console) {
+            if (
+                it.va() != (uintptr_t) console &&
+                !(it.va() == 0xB8000 && it.pa() == 0xB8000)
+            ) {
                 it.kfree_page();
             }
         }

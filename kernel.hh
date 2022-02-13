@@ -70,8 +70,11 @@ struct __attribute__((aligned(4096))) proc {
     int syscall_nastyalloc(int n);
     int syscall_testkalloc(uintptr_t heap_top, uintptr_t stack_bottom, int mode);
     int syscall_testfree(uintptr_t heap_top, uintptr_t stack_bottom);
+    
     int syscall_fork(regstate* regs);
     void syscall_exit(regstate* regs);
+
+    int syscall_msleep(regstate* regs);
 
     uintptr_t syscall_read(regstate* reg);
     uintptr_t syscall_write(regstate* reg);
