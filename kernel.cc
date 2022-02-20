@@ -15,8 +15,8 @@
 std::atomic<unsigned long> ticks;
 
 static void tick();
-static void boot_process_start(pid_t pid, const char* program_name);
-
+static void boot_process_start(pid_t pid, pid_t ppid, const char* program_name);
+void init_process_start(pid_t pid, pid_t ppid);
 
 // kernel_start(command)
 //    Initialize the hardware and processes and start running. The `command`
@@ -32,13 +32,33 @@ void kernel_start(const char* command) {
         ptable[i] = nullptr;
     }
 
-    // start first process
-    boot_process_start(1, CHICKADEE_FIRST_PROCESS);
+    // start initial kernel process
+    init_process_start(1, 1);
+
+    // start first user process
+    boot_process_start(2, 1, CHICKADEE_FIRST_PROCESS);
 
     // start running processes
     cpus[0].schedule(nullptr);
 }
 
+// proc::init_process_fn
+void init_process_fn() {
+    while(true) {
+        current()->yield();
+    }
+}
+
+void init_process_start(pid_t pid, pid_t ppid) {
+    proc* p = knew<proc>();
+    p->init_kernel(pid, ppid, &init_process_fn);
+    {
+        spinlock_guard guard(ptable_lock);
+        assert(!ptable[pid]);
+        ptable[pid] = p;
+    }
+    cpus[pid % ncpu].enqueue(p);
+}
 
 // boot_process_start(pid, name)
 //    Load application program `name` as process number `pid`.
@@ -46,7 +66,7 @@ void kernel_start(const char* command) {
 //    %rip and %rsp, gives it a stack page, and marks it as runnable.
 //    Only called at initial boot time.
 
-void boot_process_start(pid_t pid, const char* name) {
+void boot_process_start(pid_t pid, pid_t ppid, const char* name) {
     // look up process image in initfs
     memfile_loader ld(memfile::initfs_lookup(name), kalloc_pagetable());
     assert(ld.memfile_ && ld.pagetable_);
@@ -55,7 +75,7 @@ void boot_process_start(pid_t pid, const char* name) {
 
     // allocate process, initialize memory
     proc* p = knew<proc>();
-    p->init_user(pid, ld.pagetable_);
+    p->init_user(pid, ppid, ld.pagetable_);
     p->regs_->reg_rip = ld.entry_rip_;
 
     void* stkpg = kalloc(PAGESIZE);
@@ -76,7 +96,6 @@ void boot_process_start(pid_t pid, const char* name) {
     // add to run queue
     cpus[pid % ncpu].enqueue(p);
 }
-
 
 // proc::exception(reg)
 //    Exception handler (for interrupts, traps, and faults).
@@ -182,6 +201,9 @@ uintptr_t proc::run_syscall(regstate* regs) {
 
     case SYSCALL_GETPID:
         return id_;
+
+    case SYSCALL_GETPPID:
+        return ppid_;
 
     case SYSCALL_YIELD:
         yield();
@@ -387,9 +409,9 @@ int proc::syscall_fork(regstate* regs) {
         if (it.user()) {
             if (it.va() == (uintptr_t) console) {
                 // Map console to the same PA
-                vmiter(child_pagetable, it.va()).try_map(it.pa(), it.perm());
+                (void) vmiter(child_pagetable, it.va()).try_map(it.pa(), it.perm());
             } else if (it.va() == 0xB8000 && it.pa() == 0xB8000) {
-                vmiter(child_pagetable, it.va()).try_map(it.pa(), it.perm());
+                (void) vmiter(child_pagetable, it.va()).try_map(it.pa(), it.perm());
             } else {
                 // CHANGE WHEN VARIABLE SIZE IS SUPPORTED
                 void* kp = kalloc(PAGESIZE);
@@ -405,7 +427,7 @@ int proc::syscall_fork(regstate* regs) {
         }
     }
     
-    child->init_user(pid, child_pagetable);
+    child->init_user(pid, id_, child_pagetable);
 
     // Copy parent registers into child struct proc
     memcpy(child->regs_, regs, sizeof(regstate));

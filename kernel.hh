@@ -42,6 +42,7 @@ struct __attribute__((aligned(4096))) proc {
 #endif
 
     list_links runq_links_;
+    pid_t ppid_;
 
     int stack_canary_ = STACK_CANARY_VALUE;
 
@@ -51,8 +52,8 @@ struct __attribute__((aligned(4096))) proc {
     inline bool contains(uintptr_t addr) const;
     inline bool contains(void* ptr) const;
 
-    void init_user(pid_t pid, x86_64_pagetable* pt);
-    void init_kernel(pid_t pid, void (*f)());
+    void init_user(pid_t pid, pid_t ppid, x86_64_pagetable* pt);
+    void init_kernel(pid_t pid, pid_t ppid, void (*f)());
 
     static int load(proc_loader& ld);
 

@@ -17,7 +17,7 @@ proc::proc() {
 //    Initialize this `proc` as a new runnable user process with PID `pid`
 //    and initial page table `pt`.
 
-void proc::init_user(pid_t pid, x86_64_pagetable* pt) {
+void proc::init_user(pid_t pid, pid_t ppid, x86_64_pagetable* pt) {
     uintptr_t addr = reinterpret_cast<uintptr_t>(this);
     assert(!(addr & PAGEOFFMASK));
     // ensure layout `k-exception.S` expects
@@ -33,6 +33,7 @@ void proc::init_user(pid_t pid, x86_64_pagetable* pt) {
     id_ = pid;
     pagetable_ = pt;
     pstate_ = proc::ps_runnable;
+    ppid_ = ppid;
 
     regs_ = reinterpret_cast<regstate*>(addr + PROCSTACK_SIZE) - 1;
     memset(regs_, 0, sizeof(regstate));
@@ -47,11 +48,12 @@ void proc::init_user(pid_t pid, x86_64_pagetable* pt) {
 //    Initialize this `proc` as a new kernel process with PID `pid`,
 //    starting at function `f`.
 
-void proc::init_kernel(pid_t pid, void (*f)()) {
+void proc::init_kernel(pid_t pid, pid_t ppid, void (*f)()) {
     uintptr_t addr = reinterpret_cast<uintptr_t>(this);
     assert(!(addr & PAGEOFFMASK));
 
     id_ = pid;
+    ppid_ = ppid;
     pagetable_ = early_pagetable;
     pstate_ = proc::ps_runnable;
 

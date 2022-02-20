@@ -289,6 +289,7 @@ struct bitset_view {
 #define SYSCALL_TESTKALLOC      130
 #define SYSCALL_TESTFREE        131
 #define SYSCALL_MSLEEP          132
+#define SYSCALL_GETPPID         133
 
 // System call error return values
 

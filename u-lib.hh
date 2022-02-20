@@ -139,7 +139,7 @@ inline int sys_msleep(unsigned msec) {
 // sys_getppid()
 //    Return parent process ID.
 inline pid_t sys_getppid() {
-    return E_NOSYS;
+    return make_syscall(SYSCALL_GETPPID);
 }
 
 // sys_waitpid(pid, status, options)
