@@ -202,8 +202,11 @@ uintptr_t proc::run_syscall(regstate* regs) {
     case SYSCALL_GETPID:
         return id_;
 
-    case SYSCALL_GETPPID:
+    case SYSCALL_GETPPID: {
+        spinlock_guard guard(process_hierarchy_lock);
+        log_printf("SYSCALL_GETPPID for process %d => %d\n", id_, ppid_);
         return ppid_;
+    }
 
     case SYSCALL_YIELD:
         yield();
@@ -352,8 +355,8 @@ int proc::syscall_testfree(uintptr_t heap_top, uintptr_t stack_bottom) {
 }
 
 int proc::syscall_msleep(regstate* regs) {
-    uint64_t end_time = (uint64_t) ticks.load() + round_up(regs->reg_rdi, 10) / 100;
-    while(ticks.load() < end_time) {
+    uint64_t end_time = (uint64_t) ticks.load() + (regs->reg_rdi + 9) / 10;
+    while(long(end_time - ticks.load()) > 0) {
         yield();
     }
     return 0;
@@ -426,8 +429,10 @@ int proc::syscall_fork(regstate* regs) {
             }
         }
     }
-    
-    child->init_user(pid, id_, child_pagetable);
+    {
+        spinlock_guard guard(process_hierarchy_lock);
+        child->init_user(pid, id_, child_pagetable);
+    }
 
     // Copy parent registers into child struct proc
     memcpy(child->regs_, regs, sizeof(regstate));
@@ -475,6 +480,20 @@ void proc::syscall_exit(regstate* regs) {
     auto irqs = ptable_lock.lock();
     ptable[id_] = nullptr;
     ptable_lock.unlock(irqs);
+    log_printf("exiting process %d\n", id_);
+
+    {
+        spinlock_guard ptable_guard(ptable_lock);
+        spinlock_guard guard(process_hierarchy_lock);
+        for (int i = 0; i != NPROC; ++i) {
+            if (ptable[i]) {
+                if (ptable[i]->ppid_ == id_) {
+                    log_printf("updating process %d parent to %d\n", i, 1);
+                    ptable[i]->ppid_ = 1;
+                }
+            }
+        }
+    }
 
     x86_64_pagetable* original_pagetable = pagetable_;
     kfree_all_user_mappings(original_pagetable);

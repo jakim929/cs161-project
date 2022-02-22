@@ -91,6 +91,7 @@ struct __attribute__((aligned(4096))) proc {
 #define NPROC 16
 extern proc* ptable[NPROC];
 extern spinlock ptable_lock;
+extern spinlock process_hierarchy_lock;
 #define PROCSTACK_SIZE 4096UL
 
 

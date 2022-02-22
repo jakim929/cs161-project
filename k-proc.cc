@@ -5,6 +5,7 @@
 
 proc* ptable[NPROC];            // array of process descriptor pointers
 spinlock ptable_lock;           // protects `ptable`
+spinlock process_hierarchy_lock;
 
 // proc::proc()
 //    The constructor initializes the `proc` to empty.
@@ -29,6 +30,7 @@ void proc::init_user(pid_t pid, pid_t ppid, x86_64_pagetable* pt) {
     assert(!(reinterpret_cast<uintptr_t>(pt) & PAGEOFFMASK));
     assert(pt->entry[256] == early_pagetable->entry[256]);
     assert(pt->entry[511] == early_pagetable->entry[511]);
+    log_printf("creating user process %d from %d\n", pid, ppid);
 
     id_ = pid;
     pagetable_ = pt;
