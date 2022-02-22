@@ -36,6 +36,7 @@ void proc::init_user(pid_t pid, pid_t ppid, x86_64_pagetable* pt) {
     pagetable_ = pt;
     pstate_ = proc::ps_runnable;
     ppid_ = ppid;
+    sibling_links_.reset();
 
     regs_ = reinterpret_cast<regstate*>(addr + PROCSTACK_SIZE) - 1;
     memset(regs_, 0, sizeof(regstate));
@@ -56,6 +57,7 @@ void proc::init_kernel(pid_t pid, pid_t ppid, void (*f)()) {
 
     id_ = pid;
     ppid_ = ppid;
+    sibling_links_.reset();
     pagetable_ = early_pagetable;
     pstate_ = proc::ps_runnable;
 

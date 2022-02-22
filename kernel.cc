@@ -93,6 +93,11 @@ void boot_process_start(pid_t pid, pid_t ppid, const char* name) {
         ptable[pid] = p;
     }
 
+    {
+        spinlock_guard guard(process_hierarchy_lock);
+        ptable[1]->children_list_.push_back(p);
+    }
+
     // add to run queue
     cpus[pid % ncpu].enqueue(p);
 }
@@ -429,9 +434,11 @@ int proc::syscall_fork(regstate* regs) {
             }
         }
     }
+
+    child->init_user(pid, id_, child_pagetable);
     {
         spinlock_guard guard(process_hierarchy_lock);
-        child->init_user(pid, id_, child_pagetable);
+        children_list_.push_back(child);
     }
 
     // Copy parent registers into child struct proc
@@ -479,19 +486,20 @@ void proc::syscall_exit(regstate* regs) {
     // Remove current process from process table
     auto irqs = ptable_lock.lock();
     ptable[id_] = nullptr;
+    proc* parent = ptable[ppid_];
     ptable_lock.unlock(irqs);
     log_printf("exiting process %d\n", id_);
 
     {
-        spinlock_guard ptable_guard(ptable_lock);
         spinlock_guard guard(process_hierarchy_lock);
-        for (int i = 0; i != NPROC; ++i) {
-            if (ptable[i]) {
-                if (ptable[i]->ppid_ == id_) {
-                    log_printf("updating process %d parent to %d\n", i, 1);
-                    ptable[i]->ppid_ = 1;
-                }
-            }
+        log_printf("erasing for %d\n", id_);
+        sibling_links_.erase();
+        proc* child = children_list_.pop_front();
+        while (child) {
+            log_printf("updating process %d parent to %d\n", child->id_, 1);
+            child->ppid_ = 1;
+            parent->children_list_.push_back(child);
+            child = children_list_.pop_front();
         }
     }
 

@@ -43,6 +43,8 @@ struct __attribute__((aligned(4096))) proc {
 
     list_links runq_links_;
     pid_t ppid_;
+    list_links sibling_links_;
+    list<proc, &proc::sibling_links_> children_list_;
 
     int stack_canary_ = STACK_CANARY_VALUE;
 
