@@ -484,19 +484,19 @@ int proc::syscall_fork(regstate* regs) {
 
 void proc::syscall_exit(regstate* regs) {
     // Remove current process from process table
-    auto irqs = ptable_lock.lock();
-    ptable[id_] = nullptr;
-    proc* parent = ptable[ppid_];
-    ptable_lock.unlock(irqs);
-    log_printf("exiting process %d\n", id_);
-
     {
         spinlock_guard guard(process_hierarchy_lock);
-        log_printf("erasing for %d\n", id_);
+
+        auto irqs = ptable_lock.lock();
+        ptable[id_] = nullptr;
+        proc* parent = ptable[ppid_];
+        ptable_lock.unlock(irqs);
+
+        log_printf("exiting process %d\n", id_);
+
         sibling_links_.erase();
         proc* child = children_list_.pop_front();
         while (child) {
-            log_printf("updating process %d parent to %d\n", child->id_, 1);
             child->ppid_ = 1;
             parent->children_list_.push_back(child);
             child = children_list_.pop_front();
