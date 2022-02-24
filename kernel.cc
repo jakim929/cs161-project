@@ -281,6 +281,9 @@ uintptr_t proc::run_syscall(regstate* regs) {
     case SYSCALL_MSLEEP:    
         return syscall_msleep(regs);
 
+    case SYSCALL_WAITPID:    
+        return syscall_waitpid(regs);
+
     case SYSCALL_NASTYALLOC:
         return syscall_nastyalloc(1000);
 
@@ -367,6 +370,71 @@ int proc::syscall_msleep(regstate* regs) {
     return 0;
 }
 
+// Assumes process_hierarchy_lock is locked
+proc* proc::get_child(pid_t pid) {
+    proc* child = nullptr;
+    for (proc* p = children_list_.front(); p; p = children_list_.next(p)) {
+        log_printf("proc[%d] finding test %d\n", id_, p->id_);
+        if (p->id_ == pid) {
+            child = p;
+            break;
+        }
+    }
+    return child;
+}
+
+// Assumes process_hierarchy_lock is locked
+proc* proc::get_any_exited_child() {
+    proc* child = nullptr;
+    for (proc* p = children_list_.front(); p; p = children_list_.next(p)) {
+        if (p->pstate_ == ps_exited) {
+            child = p;
+            break;
+        }
+    }
+    return child;
+}
+
+int proc::syscall_waitpid(regstate* regs) {
+    pid_t pid = regs->reg_rdi;
+    int* stat = (int*) regs->reg_rsi;
+    int options = (int) regs->reg_rdx;
+
+    assert(options == W_NOHANG);
+
+    proc* wait_child = nullptr;
+    if (pid != 0) {
+        spinlock_guard guard(process_hierarchy_lock);
+        wait_child = get_child(pid);
+        if (!wait_child) {
+            return E_CHILD;
+        }
+        if (wait_child->pstate_ != ps_exited) {
+            return E_AGAIN;
+        }
+        wait_child->sibling_links_.erase();
+    } else {
+        spinlock_guard guard(process_hierarchy_lock);
+        if (children_list_.empty()) {
+            return E_CHILD;
+        }
+        wait_child = get_any_exited_child();
+        if (!wait_child) {
+            return E_AGAIN;
+        }
+        wait_child->sibling_links_.erase();
+    }
+    pid_t freed_pid = wait_child->id_;
+    *stat = wait_child->exit_status_;
+
+    {
+        spinlock_guard guard(ptable_lock);
+        ptable[freed_pid] = nullptr;
+    }
+    kfree(wait_child);
+    return freed_pid;
+}
+
 // proc::syscall_fork(regs)
 //    Handle fork system call.
 
@@ -417,6 +485,7 @@ int proc::syscall_fork(regstate* regs) {
         if (it.user()) {
             if (it.va() == (uintptr_t) console) {
                 // Map console to the same PA
+                // TODO: IF THIS FAILS ALSO FREE PAGE TABLE AND LEAVE
                 (void) vmiter(child_pagetable, it.va()).try_map(it.pa(), it.perm());
             } else if (it.va() == 0xB8000 && it.pa() == 0xB8000) {
                 (void) vmiter(child_pagetable, it.va()).try_map(it.pa(), it.perm());
@@ -483,18 +552,20 @@ int proc::syscall_fork(regstate* regs) {
 }
 
 void proc::syscall_exit(regstate* regs) {
+    exit_status_ = (int) regs->reg_rdi;
+
     // Remove current process from process table
     {
         spinlock_guard guard(process_hierarchy_lock);
 
         auto irqs = ptable_lock.lock();
-        ptable[id_] = nullptr;
+        // ptable[id_] = nullptr;
         proc* parent = ptable[ppid_];
         ptable_lock.unlock(irqs);
 
         log_printf("exiting process %d\n", id_);
 
-        sibling_links_.erase();
+        // sibling_links_.erase();
         proc* child = children_list_.pop_front();
         while (child) {
             child->ppid_ = 1;
@@ -508,8 +579,7 @@ void proc::syscall_exit(regstate* regs) {
     set_pagetable(early_pagetable);
     kfree_pagetable(original_pagetable);
     pagetable_ = early_pagetable;
-
-    pstate_ = ps_blank;
+    pstate_ = ps_exited;
 
     yield_noreturn();
 }

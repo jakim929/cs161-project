@@ -26,7 +26,7 @@ struct buddyallocator;
 // Process descriptor type
 struct __attribute__((aligned(4096))) proc {
     enum pstate_t {
-        ps_blank = 0, ps_runnable = PROC_RUNNABLE, ps_faulted
+        ps_blank = 0, ps_runnable = PROC_RUNNABLE, ps_faulted, ps_exited
     };
 
     // These four members must come first:
@@ -46,6 +46,7 @@ struct __attribute__((aligned(4096))) proc {
     list_links sibling_links_;
     list<proc, &proc::sibling_links_> children_list_;
 
+    int exit_status_;
     int stack_canary_ = STACK_CANARY_VALUE;
 
     proc();
@@ -77,11 +78,16 @@ struct __attribute__((aligned(4096))) proc {
     int syscall_fork(regstate* regs);
     void syscall_exit(regstate* regs);
 
+    int syscall_waitpid(regstate* regs);
+
     int syscall_msleep(regstate* regs);
 
     uintptr_t syscall_read(regstate* reg);
     uintptr_t syscall_write(regstate* reg);
     uintptr_t syscall_readdiskfile(regstate* reg);
+
+    proc* get_child(pid_t pid);
+    proc* get_any_exited_child();
 
     inline irqstate lock_pagetable_read();
     inline void unlock_pagetable_read(irqstate& irqs);
