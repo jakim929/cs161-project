@@ -63,6 +63,15 @@ void init_process_fn() {
         // }
         int result = p->waitpid(0, &stat, 0);
         if (result < 0) {
+            {
+                spinlock_guard ptable_guard(ptable_lock);
+                spinlock_guard hierarchy_guard(process_hierarchy_lock);
+                if (ptable[2] == nullptr && p->children_list_.empty()) {
+                    hierarchy_guard.unlock();
+                    ptable_guard.unlock();
+                    process_halt();
+                }
+            }
             p->yield();
         }
     }
