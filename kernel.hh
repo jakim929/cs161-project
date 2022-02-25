@@ -89,6 +89,8 @@ struct __attribute__((aligned(4096))) proc {
     proc* get_child(pid_t pid);
     proc* get_any_exited_child();
 
+    int waitpid(pid_t pid, int* stat, int options);
+
     inline irqstate lock_pagetable_read();
     inline void unlock_pagetable_read(irqstate& irqs);
 

@@ -44,8 +44,27 @@ void kernel_start(const char* command) {
 
 // proc::init_process_fn
 void init_process_fn() {
+    proc* p = ptable[1];
+    int stat;
     while(true) {
-        current()->yield();
+        // log_printf("called from init \n");
+        // {
+        //     spinlock_guard guard(process_hierarchy_lock);
+        //     log_printf("init has empty children? %d\n", p->children_list_.empty());
+        //     for (proc* k = p->children_list_.front(); k; k = p->children_list_.next(k)) {
+        //         if (k->pstate_ == proc::ps_exited) {
+        //             log_printf("FOUND EXITED!! %d\n", k->id_);
+        //         } else if (k->pstate_ == proc::ps_runnable) {
+        //             log_printf("FOUND RUNNABLE!! %d\n", k->id_);
+        //         } else {
+        //             log_printf("FOUND ELSE!! %d\n", k->id_);
+        //         }
+        //     }
+        // }
+        int result = p->waitpid(0, &stat, 0);
+        if (result < 0) {
+            p->yield();
+        }
     }
 }
 
@@ -395,13 +414,7 @@ proc* proc::get_any_exited_child() {
     return child;
 }
 
-int proc::syscall_waitpid(regstate* regs) {
-    pid_t pid = regs->reg_rdi;
-    int* stat = (int*) regs->reg_rsi;
-    int options = (int) regs->reg_rdx;
-
-    assert(options == W_NOHANG);
-
+int proc::waitpid(pid_t pid, int* stat, int options) {
     proc* wait_child = nullptr;
     if (pid != 0) {
         spinlock_guard guard(process_hierarchy_lock);
@@ -410,9 +423,18 @@ int proc::syscall_waitpid(regstate* regs) {
             return E_CHILD;
         }
         if (wait_child->pstate_ != ps_exited) {
-            return E_AGAIN;
+            if (options == W_NOHANG) {
+                return E_AGAIN;
+            } else {
+                while (wait_child->pstate_ != ps_exited) {
+                    guard.unlock();
+                    yield();
+                    guard.lock();
+                }
+            }
         }
         wait_child->sibling_links_.erase();
+
     } else {
         spinlock_guard guard(process_hierarchy_lock);
         if (children_list_.empty()) {
@@ -420,19 +442,41 @@ int proc::syscall_waitpid(regstate* regs) {
         }
         wait_child = get_any_exited_child();
         if (!wait_child) {
-            return E_AGAIN;
+            if (options == W_NOHANG) {
+                return E_AGAIN;
+            } else {
+                while (!wait_child) {
+                    guard.unlock();
+                    yield();
+                    guard.lock();
+                    wait_child = get_any_exited_child();
+                }
+            }
         }
         wait_child->sibling_links_.erase();
     }
     pid_t freed_pid = wait_child->id_;
-    *stat = wait_child->exit_status_;
-
+    if (stat != nullptr) {
+        *stat = wait_child->exit_status_;
+    }
     {
         spinlock_guard guard(ptable_lock);
         ptable[freed_pid] = nullptr;
     }
     kfree(wait_child);
     return freed_pid;
+}
+
+int proc::syscall_waitpid(regstate* regs) {
+    pid_t pid = regs->reg_rdi;
+    int* stat = (int*) regs->reg_rsi;
+    int options = (int) regs->reg_rdx;
+
+    return waitpid(pid, stat, options);
+
+    // assert(options == W_NOHANG);
+
+    
 }
 
 // proc::syscall_fork(regs)
@@ -568,9 +612,13 @@ void proc::syscall_exit(regstate* regs) {
         // sibling_links_.erase();
         proc* child = children_list_.pop_front();
         while (child) {
+            log_printf("iter start %d\n", child->id_);
             child->ppid_ = 1;
-            parent->children_list_.push_back(child);
+            ptable[1]->children_list_.push_back(child);
+
+            log_printf("proc[%d] reassigned %d to parent\n", id_, child->id_);
             child = children_list_.pop_front();
+
         }
     }
 
