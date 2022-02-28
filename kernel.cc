@@ -395,12 +395,17 @@ int proc::syscall_testfree(uintptr_t heap_top, uintptr_t stack_bottom) {
 int proc::syscall_msleep(regstate* regs) {
     uint64_t end_time = (uint64_t) ticks.load() + (regs->reg_rdi + 9) / 10;
     spinlock_guard guard(timer_lock);
-
+    interrupt_sleep_ = false;
     waiter().block_until(*timer_queue.get_wq_for_time(end_time), [&] () {
         // this is called with `x_lock` held
-        return long(end_time - ticks.load()) <= 0;
+        if (interrupt_sleep_) {
+            log_printf("ABOUT TO INTERRUPT!\n");
+        }
+        return long(end_time - ticks.load()) <= 0 || interrupt_sleep_;
     }, guard);
-
+    if (interrupt_sleep_) {
+        return E_INTR;
+    }
     // while(long(end_time - ticks.load()) > 0) {
     //     yield();
     // }
@@ -657,6 +662,11 @@ void proc::syscall_exit(regstate* regs) {
         pagetable_ = early_pagetable;
         pstate_ = ps_exited;
         parent->wq_.wake_all();
+        {
+            spinlock_guard timer_guard(timer_lock);
+            parent->interrupt_sleep_ = true;
+            timer_queue.wake_all();
+        }
     }
 
     yield_noreturn();
@@ -840,8 +850,7 @@ void tick() {
     {
         spinlock_guard guard(timer_lock);
         ++ticks;
-        wait_queue* wq = timer_queue.get_wq_for_time(ticks.load());
-        wq->wake_all();
+        timer_queue.wake_for_time(ticks.load());
     }
 
     // Update display

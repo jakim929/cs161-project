@@ -50,9 +50,11 @@ struct __attribute__((aligned(4096))) proc {
     int exit_status_;
     int resume_count_ = 0;
     int home_cpuindex_;
+    wait_queue wq_;
+    bool interrupt_sleep_ = false;
+
     int stack_canary_ = STACK_CANARY_VALUE;
 
-    wait_queue wq_;
 
     proc();
     NO_COPY_OR_ASSIGN(proc);
@@ -336,6 +338,8 @@ struct timingwheel {
     wait_queue wqs_[TIMING_WHEEL_QUEUE_COUNT];
 
     wait_queue* get_wq_for_time(uint64_t time);
+    void wake_for_time(uint64_t time);
+    void wake_all();
 
     timingwheel();
 };
