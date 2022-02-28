@@ -445,11 +445,14 @@ int proc::waitpid(pid_t pid, int* stat, int options) {
             if (options == W_NOHANG) {
                 return E_AGAIN;
             } else {
-                while (wait_child->pstate_ != ps_exited) {
-                    guard.unlock();
-                    yield();
-                    guard.lock();
-                }
+                waiter().block_until(wq_, [&] () {
+                    return wait_child->pstate_ == ps_exited;
+                }, guard);
+                // while (wait_child->pstate_ != ps_exited) {
+                //     guard.unlock();
+                //     yield();
+                //     guard.lock();
+                // }
             }
         }
         wait_child->sibling_links_.erase();
@@ -464,12 +467,21 @@ int proc::waitpid(pid_t pid, int* stat, int options) {
             if (options == W_NOHANG) {
                 return E_AGAIN;
             } else {
-                while (!wait_child) {
-                    guard.unlock();
-                    yield();
-                    guard.lock();
-                    wait_child = get_any_exited_child();
-                }
+                waiter().block_until(wq_, [&] () {
+                    for (proc* child = children_list_.front(); child; child = children_list_.next(child)) {
+                        if (child->pstate_ == ps_exited) {
+                            wait_child = child;
+                            break;
+                        }
+                    }
+                    return !!wait_child;
+                }, guard);
+                // while (!wait_child) {
+                //     guard.unlock();
+                //     yield();
+                //     guard.lock();
+                //     wait_child = get_any_exited_child();
+                // }
             }
         }
         wait_child->sibling_links_.erase();
@@ -495,8 +507,6 @@ int proc::syscall_waitpid(regstate* regs) {
     return waitpid(pid, stat, options);
 
     // assert(options == W_NOHANG);
-
-    
 }
 
 // proc::syscall_fork(regs)
@@ -618,13 +628,14 @@ int proc::syscall_fork(regstate* regs) {
 void proc::syscall_exit(regstate* regs) {
     exit_status_ = (int) regs->reg_rdi;
 
+    proc* parent = nullptr;
     // Remove current process from process table
     {
         spinlock_guard guard(process_hierarchy_lock);
 
         auto irqs = ptable_lock.lock();
         // ptable[id_] = nullptr;
-        proc* parent = ptable[ppid_];
+        parent = ptable[ppid_];
         ptable_lock.unlock(irqs);
 
         log_printf("exiting process %d\n", id_);
@@ -638,7 +649,6 @@ void proc::syscall_exit(regstate* regs) {
 
             log_printf("proc[%d] reassigned %d to parent\n", id_, child->id_);
             child = children_list_.pop_front();
-
         }
     }
 
@@ -647,7 +657,14 @@ void proc::syscall_exit(regstate* regs) {
     set_pagetable(early_pagetable);
     kfree_pagetable(original_pagetable);
     pagetable_ = early_pagetable;
-    pstate_ = ps_exited;
+
+    {
+        spinlock_guard guard(process_hierarchy_lock);
+        pstate_ = ps_exited;
+        parent->wq_.wake_all();
+    }
+            
+
 
     yield_noreturn();
 }

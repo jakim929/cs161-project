@@ -52,6 +52,8 @@ struct __attribute__((aligned(4096))) proc {
     int home_cpuindex_;
     int stack_canary_ = STACK_CANARY_VALUE;
 
+    wait_queue wq_;
+
     proc();
     NO_COPY_OR_ASSIGN(proc);
 
