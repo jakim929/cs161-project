@@ -640,7 +640,6 @@ void proc::syscall_exit(regstate* regs) {
 
         log_printf("exiting process %d\n", id_);
 
-        // sibling_links_.erase();
         proc* child = children_list_.pop_front();
         while (child) {
             log_printf("iter start %d\n", child->id_);
@@ -650,21 +649,15 @@ void proc::syscall_exit(regstate* regs) {
             log_printf("proc[%d] reassigned %d to parent\n", id_, child->id_);
             child = children_list_.pop_front();
         }
-    }
 
-    x86_64_pagetable* original_pagetable = pagetable_;
-    kfree_all_user_mappings(original_pagetable);
-    set_pagetable(early_pagetable);
-    kfree_pagetable(original_pagetable);
-    pagetable_ = early_pagetable;
-
-    {
-        spinlock_guard guard(process_hierarchy_lock);
+        x86_64_pagetable* original_pagetable = pagetable_;
+        kfree_all_user_mappings(original_pagetable);
+        set_pagetable(early_pagetable);
+        kfree_pagetable(original_pagetable);
+        pagetable_ = early_pagetable;
         pstate_ = ps_exited;
         parent->wq_.wake_all();
     }
-            
-
 
     yield_noreturn();
 }
