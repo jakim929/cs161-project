@@ -237,6 +237,13 @@ int proc::load_segment(const elf_program& ph, proc_loader& ld) {
     return 0;
 }
 
+void proc::wake() {
+    int s = proc::ps_blocked;
+    if (pstate_.compare_exchange_strong(s, proc::ps_runnable)) {
+        cpus[home_cpuindex_].enqueue(this);
+    }
+}
+
 
 // A `proc` cannot be smaller than a page.
 static_assert(PROCSTACK_SIZE >= sizeof(proc), "PROCSTACK_SIZE too small");

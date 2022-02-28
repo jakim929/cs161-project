@@ -35,25 +35,5 @@ void process_main() {
         }
         sys_pause();
     }
-
-    // while(true) {
-    //     for (uint8_t* addr = heap_top ; addr < stack_bottom; addr += PAGESIZE) {
-    //         if (addr != (uint8_t*) 0x200000) {
-    //             if (sys_testkalloc(addr, 0, 0) == 0) {
-    //                 break;
-    //             }
-    //         }
-
-    //     }
-    //     sys_testfree(heap_top, stack_bottom);
-
-    //     // ASKTF: 0x200000 maps to 0x400000?
-    //     // sys_testkalloc((void*) 0x200000, 0, 0);
-    //     // sys_testfree((void*) 0x200000, (void*) 0x201000);
-
-    //     sys_yield();
-    //     sys_pause();
-    // }
-
     sys_exit(0);
 }

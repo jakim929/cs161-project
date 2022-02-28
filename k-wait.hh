@@ -18,20 +18,38 @@ inline waiter::~waiter() {
 }
 
 inline void waiter::prepare(wait_queue& wq) {
-    // your code here
+    auto irqs = wq.lock_.lock();
+    p_ = current();
+    assert(p_->pstate_ != proc::ps_blocked);
+    p_->pstate_ = proc::ps_blocked;
+    wq_ = &wq;
+    wq_->q_.push_back(this);
+    wq_->lock_.unlock(irqs);
 }
 
 inline void waiter::block() {
     assert(p_ == current());
+
+    if (p_->pstate_ == proc::ps_blocked) {
+        p_->yield();
+    } else {
+
+    }
+    assert(p_->pstate_ == proc::ps_runnable);
+    clear();
     // your code here
 }
 
 inline void waiter::clear() {
-    // your code here
+    assert(p_);
+    auto irqs = wq_->lock_.lock();
+    wake();
+    if (links_.is_linked()) links_.erase();
+    wq_->lock_.unlock(irqs);
 }
 
 inline void waiter::wake() {
-    // your code here
+    p_->wake();
 }
 
 

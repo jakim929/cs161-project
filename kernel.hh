@@ -14,6 +14,7 @@ struct yieldstate;
 struct proc_loader;
 struct elf_program;
 struct buddyallocator;
+struct timingwheel;
 #define PROC_RUNNABLE 1
 #define STACK_CANARY_VALUE 3482
 
@@ -26,7 +27,7 @@ struct buddyallocator;
 // Process descriptor type
 struct __attribute__((aligned(4096))) proc {
     enum pstate_t {
-        ps_blank = 0, ps_runnable = PROC_RUNNABLE, ps_faulted, ps_exited
+        ps_blank = 0, ps_runnable = PROC_RUNNABLE, ps_faulted, ps_exited, ps_blocked
     };
 
     // These four members must come first:
@@ -47,6 +48,8 @@ struct __attribute__((aligned(4096))) proc {
     list<proc, &proc::sibling_links_> children_list_;
 
     int exit_status_;
+    int resume_count_ = 0;
+    int home_cpuindex_;
     int stack_canary_ = STACK_CANARY_VALUE;
 
     proc();
@@ -90,6 +93,8 @@ struct __attribute__((aligned(4096))) proc {
     proc* get_any_exited_child();
 
     int waitpid(pid_t pid, int* stat, int options);
+
+    void wake();
 
     inline irqstate lock_pagetable_read();
     inline void unlock_pagetable_read(irqstate& irqs);
@@ -319,6 +324,19 @@ inline T read_unaligned(const uint8_t* ptr, T (U::* member)) {
     memcpy(&a, ptr + (reinterpret_cast<uintptr_t>(&(dummy->*member)) - reinterpret_cast<uintptr_t>(dummy)), sizeof(T));
     return a;
 }
+
+extern timingwheel timer_queue;
+
+#define TIMING_WHEEL_QUEUE_COUNT 64
+
+struct timingwheel {
+    int n_ = TIMING_WHEEL_QUEUE_COUNT;
+    wait_queue wqs_[TIMING_WHEEL_QUEUE_COUNT];
+
+    wait_queue* get_wq_for_time(uint64_t time);
+
+    timingwheel();
+};
 
 #define BUDDY_ALLOCATOR_MIN_ORDER 12
 #define BUDDY_ALLOCATOR_MAX_ORDER 21
