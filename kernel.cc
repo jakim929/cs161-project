@@ -16,6 +16,8 @@ std::atomic<unsigned long> ticks;
 spinlock timer_lock;
 timingwheel timer_queue;
 
+int total_resume_count = 0;
+
 static void tick();
 static void boot_process_start(pid_t pid, pid_t ppid, const char* program_name);
 void init_process_start(pid_t pid, pid_t ppid);
@@ -450,14 +452,14 @@ int proc::waitpid(pid_t pid, int* stat, int options) {
             if (options == W_NOHANG) {
                 return E_AGAIN;
             } else {
-                waiter().block_until(wq_, [&] () {
-                    return wait_child->pstate_ == ps_exited;
-                }, guard);
-                // while (wait_child->pstate_ != ps_exited) {
-                //     guard.unlock();
-                //     yield();
-                //     guard.lock();
-                // }
+                // waiter().block_until(wq_, [&] () {
+                //     return wait_child->pstate_ == ps_exited;
+                // }, guard);
+                while (wait_child->pstate_ != ps_exited) {
+                    guard.unlock();
+                    yield();
+                    guard.lock();
+                }
             }
         }
         wait_child->sibling_links_.erase();
@@ -472,21 +474,21 @@ int proc::waitpid(pid_t pid, int* stat, int options) {
             if (options == W_NOHANG) {
                 return E_AGAIN;
             } else {
-                waiter().block_until(wq_, [&] () {
-                    for (proc* child = children_list_.front(); child; child = children_list_.next(child)) {
-                        if (child->pstate_ == ps_exited) {
-                            wait_child = child;
-                            break;
-                        }
-                    }
-                    return !!wait_child;
-                }, guard);
-                // while (!wait_child) {
-                //     guard.unlock();
-                //     yield();
-                //     guard.lock();
-                //     wait_child = get_any_exited_child();
-                // }
+                // waiter().block_until(wq_, [&] () {
+                //     for (proc* child = children_list_.front(); child; child = children_list_.next(child)) {
+                //         if (child->pstate_ == ps_exited) {
+                //             wait_child = child;
+                //             break;
+                //         }
+                //     }
+                //     return !!wait_child;
+                // }, guard);
+                while (!wait_child) {
+                    guard.unlock();
+                    yield();
+                    guard.lock();
+                    wait_child = get_any_exited_child();
+                }
             }
         }
         wait_child->sibling_links_.erase();
@@ -499,7 +501,8 @@ int proc::waitpid(pid_t pid, int* stat, int options) {
         spinlock_guard guard(ptable_lock);
         ptable[freed_pid] = nullptr;
     }
-    log_printf("proc [%d] resume count: %d\n", freed_pid, wait_child->resume_count_);
+    total_resume_count += wait_child->resume_count_;
+    log_printf("proc [%d] resume count: %d total: %d\n", freed_pid, wait_child->resume_count_, total_resume_count);
     kfree(wait_child);
     return freed_pid;
 }
