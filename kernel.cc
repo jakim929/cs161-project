@@ -452,14 +452,14 @@ int proc::waitpid(pid_t pid, int* stat, int options) {
             if (options == W_NOHANG) {
                 return E_AGAIN;
             } else {
-                // waiter().block_until(wq_, [&] () {
-                //     return wait_child->pstate_ == ps_exited;
-                // }, guard);
-                while (wait_child->pstate_ != ps_exited) {
-                    guard.unlock();
-                    yield();
-                    guard.lock();
-                }
+                waiter().block_until(wq_, [&] () {
+                    return wait_child->pstate_ == ps_exited;
+                }, guard);
+                // while (wait_child->pstate_ != ps_exited) {
+                //     guard.unlock();
+                //     yield();
+                //     guard.lock();
+                // }
             }
         }
         wait_child->sibling_links_.erase();
@@ -474,21 +474,21 @@ int proc::waitpid(pid_t pid, int* stat, int options) {
             if (options == W_NOHANG) {
                 return E_AGAIN;
             } else {
-                // waiter().block_until(wq_, [&] () {
-                //     for (proc* child = children_list_.front(); child; child = children_list_.next(child)) {
-                //         if (child->pstate_ == ps_exited) {
-                //             wait_child = child;
-                //             break;
-                //         }
-                //     }
-                //     return !!wait_child;
-                // }, guard);
-                while (!wait_child) {
-                    guard.unlock();
-                    yield();
-                    guard.lock();
-                    wait_child = get_any_exited_child();
-                }
+                waiter().block_until(wq_, [&] () {
+                    for (proc* child = children_list_.front(); child; child = children_list_.next(child)) {
+                        if (child->pstate_ == ps_exited) {
+                            wait_child = child;
+                            break;
+                        }
+                    }
+                    return !!wait_child;
+                }, guard);
+                // while (!wait_child) {
+                //     guard.unlock();
+                //     yield();
+                //     guard.lock();
+                //     wait_child = get_any_exited_child();
+                // }
             }
         }
         wait_child->sibling_links_.erase();
