@@ -1,5 +1,6 @@
 #include "k-devices.hh"
 #include "k-apic.hh"
+#include "k-wait.hh"
 
 // k-devices.cc
 //
@@ -175,6 +176,7 @@ void keyboardstate::handle_interrupt() {
         }
     }
 
+    wq_.wake_all();
     lock_.unlock(irqs);
     lapicstate::get().ack();
 }

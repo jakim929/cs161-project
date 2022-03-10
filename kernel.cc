@@ -684,12 +684,23 @@ uintptr_t proc::syscall_read(regstate* regs) {
     // This is a slow system call, so allow interrupts by default
     sti();
 
+    int fd = regs->reg_rdi;
     uintptr_t addr = regs->reg_rsi;
     size_t sz = regs->reg_rdx;
 
     // Your code here!
     // * Read from open file `fd` (reg_rdi), rather than `keyboardstate`.
     // * Validate the read buffer.
+
+    if (sz == 0) {
+        return 0;
+    }
+
+    vmiter it(this, addr);
+    if (!it.range_perm(sz, PTE_P | PTE_U | PTE_W)) {
+        return E_FAULT;
+    }
+
     auto& kbd = keyboardstate::get();
     auto irqs = kbd.lock_.lock();
 
@@ -699,13 +710,19 @@ uintptr_t proc::syscall_read(regstate* regs) {
         kbd.state_ = kbd.input;
     }
 
+    if (sz != 0) {
+        waiter().block_until(kbd.wq_, [&] () {
+            return kbd.eol_ != 0;
+        }, kbd.lock_, irqs);
+    }
+
     // yield until a line is available
     // (special case: do not block if the user wants to read 0 bytes)
-    while (sz != 0 && kbd.eol_ == 0) {
-        kbd.lock_.unlock(irqs);
-        yield();
-        irqs = kbd.lock_.lock();
-    }
+    // while (sz != 0 && kbd.eol_ == 0) {
+    //     kbd.lock_.unlock(irqs);
+    //     yield();
+    //     irqs = kbd.lock_.lock();
+    // }
 
     // read that line or lines
     size_t n = 0;
@@ -732,12 +749,23 @@ uintptr_t proc::syscall_write(regstate* regs) {
     // This is a slow system call, so allow interrupts by default
     sti();
 
+    int fd = regs->reg_rdi;
     uintptr_t addr = regs->reg_rsi;
     size_t sz = regs->reg_rdx;
 
     // Your code here!
     // * Write to open file `fd` (reg_rdi), rather than `consolestate`.
     // * Validate the write buffer.
+
+    if (sz == 0) {
+        return 0;
+    }
+
+    vmiter it(this, addr);
+    if (!it.range_perm(sz, PTE_P | PTE_U)) {
+        return E_FAULT;
+    }
+
     auto& csl = consolestate::get();
     spinlock_guard guard(csl.lock_);
     size_t n = 0;

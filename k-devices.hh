@@ -16,6 +16,7 @@
 #define KEY_DELETE      0xC9
 
 struct keyboardstate {
+    wait_queue wq_;
     spinlock lock_;
     char buf_[256];
     unsigned pos_ = 0;      // next position to read
