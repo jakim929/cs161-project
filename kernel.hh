@@ -6,6 +6,7 @@
 #include "k-lock.hh"
 #include "k-memrange.hh"
 #include "k-waitstruct.hh"
+#include "k-vfs.hh"
 #if CHICKADEE_PROCESS
 #error "kernel.hh should not be used by process code."
 #endif
@@ -23,7 +24,11 @@ struct timingwheel;
 //
 //    Functions, constants, and definitions for the kernel.
 
+#define N_GLOBAL_OPEN_FILES     32
+extern file* open_file_table[N_GLOBAL_OPEN_FILES];
+extern spinlock open_file_table_lock;
 
+#define N_FILE_DESCRIPTORS 32
 // Process descriptor type
 struct __attribute__((aligned(4096))) proc {
     enum pstate_t {
@@ -52,6 +57,9 @@ struct __attribute__((aligned(4096))) proc {
     int home_cpuindex_;
     wait_queue wq_;
     bool interrupt_sleep_ = false;
+
+    file* fd_table_[N_FILE_DESCRIPTORS];
+    spinlock fd_table_lock_;
 
     int stack_canary_ = STACK_CANARY_VALUE;
 

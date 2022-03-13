@@ -5,6 +5,7 @@
 #include "k-chkfsiter.hh"
 #include "k-devices.hh"
 #include "k-vmiter.hh"
+#include "k-vfs.hh"
 #include "obj/k-firstprocess.h"
 
 // kernel.cc
@@ -36,6 +37,10 @@ void kernel_start(const char* command) {
         ptable[i] = nullptr;
     }
 
+    for (int i = 0; i < N_GLOBAL_OPEN_FILES; i++) {
+        open_file_table[i] = nullptr;
+    }
+
     // start initial kernel process
     init_process_start(1, 1);
 
@@ -50,21 +55,7 @@ void kernel_start(const char* command) {
 void init_process_fn() {
     proc* p = ptable[1];
     int stat;
-    while(true) {
-        // log_printf("called from init \n");
-        // {
-        //     spinlock_guard guard(process_hierarchy_lock);
-        //     log_printf("init has empty children? %d\n", p->children_list_.empty());
-        //     for (proc* k = p->children_list_.front(); k; k = p->children_list_.next(k)) {
-        //         if (k->pstate_ == proc::ps_exited) {
-        //             log_printf("FOUND EXITED!! %d\n", k->id_);
-        //         } else if (k->pstate_ == proc::ps_runnable) {
-        //             log_printf("FOUND RUNNABLE!! %d\n", k->id_);
-        //         } else {
-        //             log_printf("FOUND ELSE!! %d\n", k->id_);
-        //         }
-        //     }
-        // }
+    while(true) {       
         int result = p->waitpid(0, &stat, 0);
         if (result < 0) {
             {
@@ -89,6 +80,24 @@ void init_process_start(pid_t pid, pid_t ppid) {
         assert(!ptable[pid]);
         ptable[pid] = p;
     }
+
+    kb_c_vnode* keyboard_console_vnode = knew<kb_c_vnode>();
+    keyboard_console_vnode->init();
+    file* kbc_file = knew<file>();
+    kbc_file->init(keyboard_console_vnode, VFS_FILE_READ | VFS_FILE_WRITE);
+    {
+        spinlock_guard guard(open_file_table_lock);
+        assert(!open_file_table[0]);
+        open_file_table[0] = kbc_file;
+    }
+    for (int i = 0; i < N_FILE_DESCRIPTORS; i++) {
+        p->fd_table_[i] = nullptr;
+    }
+
+    p->fd_table_[0] = kbc_file;
+    p->fd_table_[1] = kbc_file;
+    p->fd_table_[2] = kbc_file;
+
     cpus[pid % ncpu].enqueue(p);
 }
 
@@ -701,48 +710,16 @@ uintptr_t proc::syscall_read(regstate* regs) {
         return E_FAULT;
     }
 
-    auto& kbd = keyboardstate::get();
-    auto irqs = kbd.lock_.lock();
-
-    // mark that we are now reading from the keyboard
-    // (so `q` should not power off)
-    if (kbd.state_ == kbd.boot) {
-        kbd.state_ = kbd.input;
+    file* file = nullptr;
+    {
+        spinlock_guard fd_table_guard(fd_table_lock_);
+        file = fd_table_[fd];
     }
-
-    if (sz != 0) {
-        waiter().block_until(kbd.wq_, [&] () {
-            return kbd.eol_ != 0;
-        }, kbd.lock_, irqs);
+    if (!file) {
+        return E_FAULT;
     }
-
-    // yield until a line is available
-    // (special case: do not block if the user wants to read 0 bytes)
-    // while (sz != 0 && kbd.eol_ == 0) {
-    //     kbd.lock_.unlock(irqs);
-    //     yield();
-    //     irqs = kbd.lock_.lock();
-    // }
-
-    // read that line or lines
-    size_t n = 0;
-    while (kbd.eol_ != 0 && n < sz) {
-        if (kbd.buf_[kbd.pos_] == 0x04) {
-            // Ctrl-D means EOF
-            if (n == 0) {
-                kbd.consume(1);
-            }
-            break;
-        } else {
-            *reinterpret_cast<char*>(addr) = kbd.buf_[kbd.pos_];
-            ++addr;
-            ++n;
-            kbd.consume(1);
-        }
-    }
-
-    kbd.lock_.unlock(irqs);
-    return n;
+    vnode* v = file->vnode_;
+    return v->read(reinterpret_cast<char*>(addr), sz);
 }
 
 uintptr_t proc::syscall_write(regstate* regs) {
@@ -766,16 +743,27 @@ uintptr_t proc::syscall_write(regstate* regs) {
         return E_FAULT;
     }
 
-    auto& csl = consolestate::get();
-    spinlock_guard guard(csl.lock_);
-    size_t n = 0;
-    while (n < sz) {
-        int ch = *reinterpret_cast<const char*>(addr);
-        ++addr;
-        ++n;
-        console_printf(0x0F00, "%c", ch);
+    file* file = nullptr;
+    {
+        spinlock_guard fd_table_guard(fd_table_lock_);
+        file = fd_table_[fd];
     }
-    return n;
+    if (!file) {
+        return E_FAULT;
+    }
+    vnode* v = file->vnode_;
+    return v->write(reinterpret_cast<char*>(addr), sz);
+
+    // auto& csl = consolestate::get();
+    // spinlock_guard guard(csl.lock_);
+    // size_t n = 0;
+    // while (n < sz) {
+    //     int ch = *reinterpret_cast<const char*>(addr);
+    //     ++addr;
+    //     ++n;
+    //     console_printf(0x0F00, "%c", ch);
+    // }
+    // return n;
 }
 
 uintptr_t proc::syscall_readdiskfile(regstate* regs) {

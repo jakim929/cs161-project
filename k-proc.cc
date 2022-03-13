@@ -44,6 +44,14 @@ void proc::init_user(pid_t pid, pid_t ppid, x86_64_pagetable* pt) {
     regs_->reg_ss = SEGSEL_APP_DATA | 3;
     regs_->reg_rflags = EFLAGS_IF;
     regs_->reg_swapgs = 1;
+
+    for (int i = 0; i < N_FILE_DESCRIPTORS; i++) {
+        fd_table_[i] = nullptr;
+    }
+
+    fd_table_[0] = open_file_table[0];
+    fd_table_[1] = open_file_table[0];
+    fd_table_[2] = open_file_table[0];    
 }
 
 
