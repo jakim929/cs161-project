@@ -48,12 +48,19 @@ void proc::init_user(pid_t pid, pid_t ppid, x86_64_pagetable* pt) {
     for (int i = 0; i < N_FILE_DESCRIPTORS; i++) {
         fd_table_[i] = nullptr;
     }
-
-    fd_table_[0] = open_file_table[0];
-    fd_table_[1] = open_file_table[0];
-    fd_table_[2] = open_file_table[0];    
 }
 
+void proc::copy_fd_table_from_proc(proc* source) {
+    spinlock_guard fd_guard(source->fd_table_lock_);
+    for (int i = 0; i < N_FILE_DESCRIPTORS; i++) {
+        file* file = source->fd_table_[i];
+        if (file) {
+            spinlock_guard guard(file->ref_count_lock_);
+            file->ref_count_++;
+            fd_table_[i] = file;
+        }
+    }
+}
 
 // proc::init_kernel(pid, f)
 //    Initialize this `proc` as a new kernel process with PID `pid`,
@@ -77,6 +84,10 @@ void proc::init_kernel(pid_t pid, pid_t ppid, void (*f)()) {
     regs_->reg_rsp = addr + PROCSTACK_SIZE;
     regs_->reg_rip = reinterpret_cast<uintptr_t>(f);
     regs_->reg_rdi = addr;
+
+    for (int i = 0; i < N_FILE_DESCRIPTORS; i++) {
+        fd_table_[i] = nullptr;
+    }
 }
 
 

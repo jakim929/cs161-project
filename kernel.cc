@@ -119,6 +119,10 @@ void boot_process_start(pid_t pid, pid_t ppid, const char* name) {
     p->init_user(pid, ppid, ld.pagetable_);
     p->regs_->reg_rip = ld.entry_rip_;
 
+    // not locking because init process MUST exist
+    assert(ptable[1]);
+    p->copy_fd_table_from_proc(ptable[1]);
+
     void* stkpg = kalloc(PAGESIZE);
     assert(stkpg);
     vmiter(p, MEMSIZE_VIRTUAL - PAGESIZE).map(stkpg, PTE_PWU);
@@ -133,7 +137,6 @@ void boot_process_start(pid_t pid, pid_t ppid, const char* name) {
         assert(!ptable[pid]);
         ptable[pid] = p;
     }
-
     {
         spinlock_guard guard(process_hierarchy_lock);
         ptable[1]->children_list_.push_back(p);
@@ -324,6 +327,12 @@ uintptr_t proc::run_syscall(regstate* regs) {
 
     case SYSCALL_WAITPID:    
         return syscall_waitpid(regs);
+
+    case SYSCALL_DUP2:
+        return syscall_dup2(regs);
+
+    case SYSCALL_CLOSE:
+        return syscall_close(regs);
 
     case SYSCALL_NASTYALLOC:
         return syscall_nastyalloc(1000);
@@ -526,6 +535,69 @@ int proc::syscall_waitpid(regstate* regs) {
     // assert(options == W_NOHANG);
 }
 
+int proc::close_fd(int fd, spinlock_guard& guard) {
+    file* open_file = fd_table_[fd];
+    if (!open_file) {
+        return -1;
+    }
+
+    fd_table_[fd] = nullptr;
+    {
+        spinlock_guard ref_count_guard(open_file->ref_count_lock_);
+        open_file->ref_count_--;
+        assert(open_file->ref_count_ >= 0);
+        if (open_file->ref_count_ == 0) {
+            // no one should be using vnode at this point
+            {
+                spinlock_guard open_file_table_guard(open_file_table_lock);
+                for (int i = 0; i < N_GLOBAL_OPEN_FILES; i++) {
+                    // Optimize so you don't have to go through entire table
+                    if (open_file_table[i] == open_file) {
+                        open_file_table[i] = nullptr;
+                        break;
+                    }
+                }
+
+            }
+            open_file->vnode_->close();
+            kfree(open_file->vnode_);
+            kfree(open_file);
+        }
+    }
+    return 0;
+}
+
+int proc::syscall_close(regstate* regs) {
+    int fd = regs->reg_rdi;
+    assert(fd >= 0 && fd < N_FILE_DESCRIPTORS);
+    spinlock_guard guard(fd_table_lock_);
+    return close_fd(fd, guard);
+}
+
+int proc::syscall_dup2(regstate* regs) {
+    int oldfd = regs->reg_rdi;
+    int newfd = regs->reg_rsi;
+    spinlock_guard guard(fd_table_lock_);
+    file* file_to_dup = fd_table_[oldfd];
+    file* open_file = fd_table_[newfd];
+
+    if (!file_to_dup) {
+        return E_BADF;
+    }
+
+    if (open_file) {
+        close_fd(newfd, guard);
+    }
+
+    {
+        spinlock_guard ref_count_guard(file_to_dup->ref_count_lock_);
+        file_to_dup->ref_count_++;
+        fd_table_[newfd] = file_to_dup;
+    }
+    return newfd;
+}
+
+
 // proc::syscall_fork(regs)
 //    Handle fork system call.
 
@@ -596,10 +668,14 @@ int proc::syscall_fork(regstate* regs) {
     }
 
     child->init_user(pid, id_, child_pagetable);
+
     {
         spinlock_guard guard(process_hierarchy_lock);
         children_list_.push_back(child);
     }
+
+    // copy over file descriptor table from parent
+    child->copy_fd_table_from_proc(this);
 
     // Copy parent registers into child struct proc
     memcpy(child->regs_, regs, sizeof(regstate));
@@ -716,7 +792,7 @@ uintptr_t proc::syscall_read(regstate* regs) {
         file = fd_table_[fd];
     }
     if (!file) {
-        return E_FAULT;
+        return E_BADF;
     }
     vnode* v = file->vnode_;
     return v->read(reinterpret_cast<char*>(addr), sz);
@@ -734,6 +810,10 @@ uintptr_t proc::syscall_write(regstate* regs) {
     // * Write to open file `fd` (reg_rdi), rather than `consolestate`.
     // * Validate the write buffer.
 
+    if (fd < 0 || fd >= N_FILE_DESCRIPTORS) {
+        return E_BADF;
+    }
+
     if (sz == 0) {
         return 0;
     }
@@ -749,7 +829,7 @@ uintptr_t proc::syscall_write(regstate* regs) {
         file = fd_table_[fd];
     }
     if (!file) {
-        return E_FAULT;
+        return E_BADF;
     }
     vnode* v = file->vnode_;
     return v->write(reinterpret_cast<char*>(addr), sz);
@@ -841,6 +921,7 @@ static void memshow() {
     }
 
     spinlock_guard guard(ptable_lock);
+    spinlock_guard hierarchy_guard(process_hierarchy_lock);
 
     int search = 0;
     while ((!ptable[showing]

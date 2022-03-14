@@ -69,3 +69,8 @@ ssize_t kb_c_vnode::write(char* buf, size_t sz) {
     }
     return n;
 }
+
+void kb_c_vnode::close() {
+    // no clean up to do
+    return;
+}

@@ -100,6 +100,12 @@ struct __attribute__((aligned(4096))) proc {
     uintptr_t syscall_read(regstate* reg);
     uintptr_t syscall_write(regstate* reg);
     uintptr_t syscall_readdiskfile(regstate* reg);
+    int syscall_dup2(regstate* reg);
+    int syscall_close(regstate* reg);
+
+    int close_fd(int fd, spinlock_guard& guard);
+
+    void copy_fd_table_from_proc(proc* source);
 
     proc* get_child(pid_t pid);
     proc* get_any_exited_child();

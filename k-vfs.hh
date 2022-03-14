@@ -9,6 +9,7 @@ class vnode {
   virtual ssize_t read(char* buf, size_t sz);
   virtual ssize_t write(char* buf, size_t sz);
   virtual void init();
+  virtual void close();
 };
 
 class file {
@@ -25,6 +26,7 @@ class kb_c_vnode: public vnode {
  public:
   ssize_t read(char* buf, size_t sz);
   ssize_t write(char* buf, size_t sz);
+  void close();
   void init();
 };
 
