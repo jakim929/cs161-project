@@ -249,6 +249,8 @@ void consolestate::cursor(bool show) {
 
 // memfile functions
 
+static spinlock initfs_lock_;
+
 // memfile::initfs_lookup(name, namelen, create)
 //    Search `memfile::initfs` for a file named `name`. Return the
 //    index of that `memfile` if found; this will be >= 0 and <
@@ -259,6 +261,7 @@ int memfile::initfs_lookup(const char* name, bool create) {
     memfile* empty = nullptr;
     size_t namelen = min(strlen(name), size_t(namesize) - 1);
 
+    spinlock_guard guard(initfs_lock_);
     // search for a file named `name`
     for (memfile* f = initfs; f != initfs + initfs_size; ++f) {
         if (!f->empty()
@@ -365,7 +368,12 @@ ssize_t memfile_vnode::read(char* buf, size_t sz, size_t offset) {
 }
 
 ssize_t memfile_vnode::write(char* buf, size_t sz, size_t offset) {
-    return 0;
+    int res = memfile_->set_length(memfile_->len_ + sz);
+    if (res != 0) {
+        return E_NOSPC;
+    }
+    memcpy(memfile_->data_ + offset, buf, sz);
+    return sz;
 }
 
 void memfile_vnode::close() {

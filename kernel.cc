@@ -685,19 +685,19 @@ uint64_t proc::syscall_pipe(regstate* regs) {
     file* pipe_write_file = knew<file>(pipe_write_vnode, VFS_FILE_WRITE);
 
     spinlock_guard guard(fd_table_lock_);
-    uint64_t read_fd = get_open_fd(guard);
+    int read_fd = get_open_fd(guard);
     if (read_fd < 0) {
         return E_NFILE;
     }
     fd_table_[read_fd] = pipe_read_file;
     
-    uint64_t write_fd = get_open_fd(guard);
+    int write_fd = get_open_fd(guard);
     if (write_fd < 0) {
         return E_NFILE;
     }
     fd_table_[write_fd] = pipe_write_file;
 
-    return read_fd | (write_fd << 32);
+    return ((uint64_t) read_fd) | (((uint64_t) write_fd) << 32);
 }
 
 // proc::syscall_fork(regs)

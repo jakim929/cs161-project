@@ -106,6 +106,36 @@ void process_main() {
     assert_eq(f2, E_FAULT);
 
 
+// Some tests for write
+
+    char write_buf[200];
+    int w = sys_open("test.txt", OF_WRITE | OF_CREATE);
+    assert_gt(w, 2);
+
+    strcpy(write_buf, "JAMES");
+    int res = sys_write(w, write_buf, 4);
+    assert_eq(res, 4);
+
+    res = sys_read(w, buf, 4);
+    assert_eq(res, E_BADF);
+
+    int r1 = sys_open("test.txt", OF_READ);
+    assert_gt(r1, w);
+
+    res = sys_read(r1, buf, 4);
+    assert_eq(res, 4);
+    assert_memeq(buf, "JAME", 4);
+
+    res = sys_write(r1, write_buf, 4);
+    assert_eq(res, E_BADF);
+
+    res = sys_write(w, write_buf + 4, 1);
+    assert_eq(res, 1);
+
+    res = sys_read(r1, buf, 1);
+    assert_eq(res, 1);
+    assert_memeq(buf, "S", 1);
+
     console_printf("testmemfs succeeded.\n");
     sys_exit(0);
 }
