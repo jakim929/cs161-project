@@ -8,11 +8,11 @@
 file* open_file_table[N_GLOBAL_OPEN_FILES];
 spinlock open_file_table_lock;
 
-void file::init(vnode* node, int perm) {
-  perm_ = perm;
-  vnode_ = node;
-  offset_ = 0;
-  ref_count_ = 1;
+
+file::file(vnode* node, int perm)
+    : vnode_(node), perm_(perm) {
+    offset_ = 0;
+    ref_count_ = 1;
 }
 
 ssize_t file::vfs_read(char* buf, size_t sz) {
@@ -31,6 +31,7 @@ ssize_t file::vfs_write(char* buf, size_t sz) {
 
 void file::vfs_close() {
     vnode_->close();
+    kfree(vnode_);
 }
 
 /*

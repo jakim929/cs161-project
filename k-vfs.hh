@@ -18,15 +18,16 @@ class vnode {
 
 class file {
  public:
-  int perm_;
-  int offset_;
-  vnode* vnode_;
   int ref_count_;
   spinlock ref_count_lock_;
-  void init(vnode* node, int perm);
+  file(vnode* node, int perm);
   ssize_t vfs_read(char* buf, size_t sz);
   ssize_t vfs_write(char* buf, size_t sz);
   void vfs_close();
+ private:
+  int perm_;
+  int offset_;
+  vnode* vnode_;
 };
 
 class kb_c_vnode: public vnode {

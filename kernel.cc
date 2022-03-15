@@ -82,8 +82,7 @@ void init_process_start(pid_t pid, pid_t ppid) {
     }
 
     kb_c_vnode* keyboard_console_vnode = knew<kb_c_vnode>();
-    file* kbc_file = knew<file>();
-    kbc_file->init(keyboard_console_vnode, VFS_FILE_READ | VFS_FILE_WRITE);
+    file* kbc_file = knew<file>(keyboard_console_vnode, VFS_FILE_READ | VFS_FILE_WRITE);
     {
         spinlock_guard guard(open_file_table_lock);
         assert(!open_file_table[0]);
@@ -556,16 +555,13 @@ int proc::close_fd(int fd, spinlock_guard& guard) {
                 for (int i = 0; i < N_GLOBAL_OPEN_FILES; i++) {
                     // Optimize so you don't have to go through entire table
                     if (open_file_table[i] == open_file) {
-                        log_printf("CLOSING GLOBAL %d\n", i);
                         open_file_table[i] = nullptr;
                         break;
                     }
                 }
 
             }
-            log_printf("closing %p => %p\n", open_file, open_file->vnode_);
             open_file->vfs_close();
-            kfree(open_file->vnode_);
             kfree(open_file);
         }
     }
@@ -614,12 +610,10 @@ int proc::get_open_fd(spinlock_guard& guard) {
 uint64_t proc::syscall_pipe(regstate* regs) {
     pipe* new_pipe = knew<pipe>();
     pipe_vnode* pipe_read_vnode = knew<pipe_vnode>(new_pipe, true);
-    file* pipe_read_file = knew<file>();
-    pipe_read_file->init(pipe_read_vnode, VFS_FILE_READ);
+    file* pipe_read_file = knew<file>(pipe_read_vnode, VFS_FILE_READ);
 
     pipe_vnode* pipe_write_vnode = knew<pipe_vnode>(new_pipe, false);
-    file* pipe_write_file = knew<file>();
-    pipe_write_file->init(pipe_write_vnode, VFS_FILE_WRITE);
+    file* pipe_write_file = knew<file>(pipe_write_vnode, VFS_FILE_WRITE);
 
     spinlock_guard guard(fd_table_lock_);
     uint64_t read_fd = get_open_fd(guard);
