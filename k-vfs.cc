@@ -15,10 +15,27 @@ void file::init(vnode* node, int perm) {
   ref_count_ = 1;
 }
 
-// kb_c_vnode: vnode sub-class for keyboard and console
-void kb_c_vnode::init() {
+ssize_t file::vfs_read(char* buf, size_t sz) {
+    if (!(perm_ & VFS_FILE_READ)) {
+        return E_BADF;
+    }
+    return vnode_->read(buf, sz);
 }
 
+ssize_t file::vfs_write(char* buf, size_t sz) {
+    if (!(perm_ & VFS_FILE_WRITE)) {
+        return E_BADF;
+    }
+    return vnode_->write(buf, sz);
+}
+
+void file::vfs_close() {
+    vnode_->close();
+}
+
+/*
+    kb_c_vnode: vnode sub-class for keyboard and console
+*/
 ssize_t kb_c_vnode::read(char* buf, size_t sz) {
   auto& kbd = keyboardstate::get();
   auto irqs = kbd.lock_.lock();
@@ -73,4 +90,105 @@ ssize_t kb_c_vnode::write(char* buf, size_t sz) {
 void kb_c_vnode::close() {
     // no clean up to do
     return;
+}
+
+/*
+    pipe_vnode: vnode sub-class for pipes
+*/
+pipe_vnode::pipe_vnode(pipe* underlying_pipe, bool is_read)
+    : pipe_(underlying_pipe), is_read_(is_read) {
+    log_printf("initializing %d\n", is_read_);
+}
+
+ssize_t pipe_vnode::read(char* buf, size_t sz) {
+        log_printf("reading %d\n", is_read_);
+
+    return pipe_->read(buf, sz);
+}   
+
+ssize_t pipe_vnode::write(char* buf, size_t sz) {
+    log_printf("writing %d\n", is_read_);
+    return pipe_->write(buf, sz);
+}
+
+void pipe_vnode::close() {
+    if (is_read_) {
+        pipe_->close_read();
+    } else {
+        pipe_->close_write();
+    }
+    spinlock_guard guard(pipe_->lock_);
+    if (pipe_->is_closed(guard)) {
+        kfree(pipe_);
+    }
+}
+
+/*
+    pipe: underlying data structure for a pipe
+*/
+pipe::pipe() {
+    write_open_ = true;
+    read_open_ = true;
+}
+
+ssize_t pipe::read(char* buf, size_t sz) {
+    log_printf("pipe read %d\n", current()->id_);
+    spinlock_guard guard(lock_);
+    waiter().block_until(wq_, [&] () {
+        log_printf("%d/ WRITE_OPEN: %d\n", blen_, write_open_);
+        return blen_ > 0 || !write_open_;
+    }, guard);
+
+    size_t read = 0;
+    while (read < sz && blen_ > 0) {
+      buf[read] = bbuf_[bpos_];
+      bpos_ = (bpos_ + 1) % bsize_;
+      blen_--;
+      read++;
+    }
+    assert(!write_open_ || read > 0);
+    wq_.wake_all();
+    return read;
+}
+
+ssize_t pipe::write(char* buf, size_t sz) {
+    spinlock_guard guard(lock_);
+    if (!read_open_) {
+        return E_PIPE;
+    }
+    waiter().block_until(wq_, [&] () {
+        return bsize_ - blen_ >= sz || !read_open_;
+    }, guard);
+
+    size_t written = 0;
+    while (written < sz && blen_ < bsize_) {
+        size_t id = (this->bpos_ + this->blen_) % bsize_;
+        bbuf_[id] = buf[written];
+        blen_++;
+        written++;
+    }
+    assert(written > 0);
+    wq_.wake_all();
+    return written;
+}
+
+void pipe::close_read() {
+    spinlock_guard guard(lock_);
+        log_printf("[proc %d] close_read\n", current()->id_);
+
+    read_open_ = false;
+    wq_.wake_all();
+    return;
+}
+
+void pipe::close_write() {
+    spinlock_guard guard(lock_);
+    log_printf("[proc %d] close_write\n", current()->id_);
+    write_open_ = false;
+    wq_.wake_all();
+    return;
+}
+
+bool pipe::is_closed(spinlock_guard& guard) {
+    return !read_open_ && !write_open_;
 }

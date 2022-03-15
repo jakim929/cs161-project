@@ -82,7 +82,6 @@ void init_process_start(pid_t pid, pid_t ppid) {
     }
 
     kb_c_vnode* keyboard_console_vnode = knew<kb_c_vnode>();
-    keyboard_console_vnode->init();
     file* kbc_file = knew<file>();
     kbc_file->init(keyboard_console_vnode, VFS_FILE_READ | VFS_FILE_WRITE);
     {
@@ -334,6 +333,9 @@ uintptr_t proc::run_syscall(regstate* regs) {
     case SYSCALL_CLOSE:
         return syscall_close(regs);
 
+    case SYSCALL_PIPE:
+        return syscall_pipe(regs);
+
     case SYSCALL_NASTYALLOC:
         return syscall_nastyalloc(1000);
 
@@ -536,9 +538,10 @@ int proc::syscall_waitpid(regstate* regs) {
 }
 
 int proc::close_fd(int fd, spinlock_guard& guard) {
+    // log_printf("PROCESS %d TRYING TO CLOSE %d\n", id_, fd);
     file* open_file = fd_table_[fd];
     if (!open_file) {
-        return -1;
+        return E_BADF;
     }
 
     fd_table_[fd] = nullptr;
@@ -553,13 +556,15 @@ int proc::close_fd(int fd, spinlock_guard& guard) {
                 for (int i = 0; i < N_GLOBAL_OPEN_FILES; i++) {
                     // Optimize so you don't have to go through entire table
                     if (open_file_table[i] == open_file) {
+                        log_printf("CLOSING GLOBAL %d\n", i);
                         open_file_table[i] = nullptr;
                         break;
                     }
                 }
 
             }
-            open_file->vnode_->close();
+            log_printf("closing %p => %p\n", open_file, open_file->vnode_);
+            open_file->vfs_close();
             kfree(open_file->vnode_);
             kfree(open_file);
         }
@@ -597,6 +602,40 @@ int proc::syscall_dup2(regstate* regs) {
     return newfd;
 }
 
+int proc::get_open_fd(spinlock_guard& guard) {
+    for (int i = 0; i < N_FILE_DESCRIPTORS; i++) {
+        if (fd_table_[i] == nullptr) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+uint64_t proc::syscall_pipe(regstate* regs) {
+    pipe* new_pipe = knew<pipe>();
+    pipe_vnode* pipe_read_vnode = knew<pipe_vnode>(new_pipe, true);
+    file* pipe_read_file = knew<file>();
+    pipe_read_file->init(pipe_read_vnode, VFS_FILE_READ);
+
+    pipe_vnode* pipe_write_vnode = knew<pipe_vnode>(new_pipe, false);
+    file* pipe_write_file = knew<file>();
+    pipe_write_file->init(pipe_write_vnode, VFS_FILE_WRITE);
+
+    spinlock_guard guard(fd_table_lock_);
+    uint64_t read_fd = get_open_fd(guard);
+    if (read_fd < 0) {
+        return E_NFILE;
+    }
+    fd_table_[read_fd] = pipe_read_file;
+    
+    uint64_t write_fd = get_open_fd(guard);
+    if (write_fd < 0) {
+        return E_NFILE;
+    }
+    fd_table_[write_fd] = pipe_write_file;
+
+    return read_fd | (write_fd << 32);
+}
 
 // proc::syscall_fork(regs)
 //    Handle fork system call.
@@ -724,12 +763,11 @@ void proc::syscall_exit(regstate* regs) {
     proc* parent = nullptr;
     // Remove current process from process table
     {
-        spinlock_guard guard(process_hierarchy_lock);
-
         auto irqs = ptable_lock.lock();
         // ptable[id_] = nullptr;
         parent = ptable[ppid_];
         ptable_lock.unlock(irqs);
+        spinlock_guard guard(process_hierarchy_lock);
 
         log_printf("exiting process %d\n", id_);
 
@@ -742,6 +780,15 @@ void proc::syscall_exit(regstate* regs) {
             log_printf("proc[%d] reassigned %d to parent\n", id_, child->id_);
             child = children_list_.pop_front();
         }
+
+        {
+            spinlock_guard fd_table_guard(fd_table_lock_);
+            for (int i = 0; i < N_FILE_DESCRIPTORS; i++) {
+                if (fd_table_[i]) {
+                    close_fd(i, fd_table_guard);
+                }
+            }
+        }        
 
         x86_64_pagetable* original_pagetable = pagetable_;
         kfree_all_user_mappings(original_pagetable);
@@ -794,8 +841,7 @@ uintptr_t proc::syscall_read(regstate* regs) {
     if (!file) {
         return E_BADF;
     }
-    vnode* v = file->vnode_;
-    return v->read(reinterpret_cast<char*>(addr), sz);
+    return file->vfs_read(reinterpret_cast<char*>(addr), sz);
 }
 
 uintptr_t proc::syscall_write(regstate* regs) {
@@ -805,6 +851,8 @@ uintptr_t proc::syscall_write(regstate* regs) {
     int fd = regs->reg_rdi;
     uintptr_t addr = regs->reg_rsi;
     size_t sz = regs->reg_rdx;
+
+    log_printf("syscall_write %d [%zu]\n", fd, sz);
 
     // Your code here!
     // * Write to open file `fd` (reg_rdi), rather than `consolestate`.
@@ -831,8 +879,7 @@ uintptr_t proc::syscall_write(regstate* regs) {
     if (!file) {
         return E_BADF;
     }
-    vnode* v = file->vnode_;
-    return v->write(reinterpret_cast<char*>(addr), sz);
+    return file->vfs_write(reinterpret_cast<char*>(addr), sz);
 
     // auto& csl = consolestate::get();
     // spinlock_guard guard(csl.lock_);

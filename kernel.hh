@@ -100,8 +100,12 @@ struct __attribute__((aligned(4096))) proc {
     uintptr_t syscall_read(regstate* reg);
     uintptr_t syscall_write(regstate* reg);
     uintptr_t syscall_readdiskfile(regstate* reg);
+
     int syscall_dup2(regstate* reg);
     int syscall_close(regstate* reg);
+    uint64_t syscall_pipe(regstate* reg);
+
+    int get_open_fd(spinlock_guard& guard);
 
     int close_fd(int fd, spinlock_guard& guard);
 
