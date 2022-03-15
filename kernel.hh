@@ -97,6 +97,8 @@ struct __attribute__((aligned(4096))) proc {
 
     int syscall_msleep(regstate* regs);
 
+    int syscall_open(regstate* reg);
+
     uintptr_t syscall_read(regstate* reg);
     uintptr_t syscall_write(regstate* reg);
     uintptr_t syscall_readdiskfile(regstate* reg);
@@ -106,6 +108,7 @@ struct __attribute__((aligned(4096))) proc {
     uint64_t syscall_pipe(regstate* reg);
 
     int get_open_fd(spinlock_guard& guard);
+    int assign_to_open_fd(file* f);
 
     int close_fd(int fd, spinlock_guard& guard);
 
@@ -113,6 +116,8 @@ struct __attribute__((aligned(4096))) proc {
 
     proc* get_child(pid_t pid);
     proc* get_any_exited_child();
+
+    bool is_valid_pathname(uintptr_t pathname);
 
     int waitpid(pid_t pid, int* stat, int options);
 

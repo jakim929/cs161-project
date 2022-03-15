@@ -17,16 +17,25 @@ file::file(vnode* node, int perm)
 
 ssize_t file::vfs_read(char* buf, size_t sz) {
     if (!(perm_ & VFS_FILE_READ)) {
+        log_printf("RETURINING AT PERMCHECK! \n");
         return E_BADF;
     }
-    return vnode_->read(buf, sz);
+    ssize_t read = vnode_->read(buf, sz, offset_);
+    if (read > 0) {
+        offset_ += read;
+    }
+    return read;
 }
 
 ssize_t file::vfs_write(char* buf, size_t sz) {
     if (!(perm_ & VFS_FILE_WRITE)) {
         return E_BADF;
     }
-    return vnode_->write(buf, sz);
+    ssize_t written = vnode_->write(buf, sz, offset_);
+    if (written > 0) {
+        offset_ += written;
+    }
+    return written;
 }
 
 void file::vfs_close() {
@@ -37,7 +46,7 @@ void file::vfs_close() {
 /*
     kb_c_vnode: vnode sub-class for keyboard and console
 */
-ssize_t kb_c_vnode::read(char* buf, size_t sz) {
+ssize_t kb_c_vnode::read(char* buf, size_t sz, size_t offset) {
   auto& kbd = keyboardstate::get();
   auto irqs = kbd.lock_.lock();
 
@@ -74,7 +83,7 @@ ssize_t kb_c_vnode::read(char* buf, size_t sz) {
   return n;
 }
 
-ssize_t kb_c_vnode::write(char* buf, size_t sz) {
+ssize_t kb_c_vnode::write(char* buf, size_t sz, size_t offset) {
   log_printf("TESTING! %zu\n", sz);
     auto& csl = consolestate::get();
     spinlock_guard guard(csl.lock_);
@@ -101,13 +110,13 @@ pipe_vnode::pipe_vnode(pipe* underlying_pipe, bool is_read)
     log_printf("initializing %d\n", is_read_);
 }
 
-ssize_t pipe_vnode::read(char* buf, size_t sz) {
+ssize_t pipe_vnode::read(char* buf, size_t sz, size_t offset) {
         log_printf("reading %d\n", is_read_);
 
     return pipe_->read(buf, sz);
 }   
 
-ssize_t pipe_vnode::write(char* buf, size_t sz) {
+ssize_t pipe_vnode::write(char* buf, size_t sz, size_t offset) {
     log_printf("writing %d\n", is_read_);
     return pipe_->write(buf, sz);
 }

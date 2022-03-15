@@ -4,10 +4,12 @@
 #define VFS_FILE_READ           000000000200
 #define VFS_FILE_WRITE          000000000400
 
+// TODO: After memfs, i had to add offset in order to keep track of last read position
+// this is tracked in the file::read level
 class vnode {
  public:
-  virtual ssize_t read(char* buf, size_t sz);
-  virtual ssize_t write(char* buf, size_t sz);
+  virtual ssize_t read(char* buf, size_t sz, size_t offset);
+  virtual ssize_t write(char* buf, size_t sz, size_t offset);
   // TODO: Change made during pipe:: change from close() to close_read and close_write
   // virtual void close_read();
   // virtual void close_write();
@@ -17,6 +19,8 @@ class vnode {
 };
 
 class file {
+
+  // TODO: add index inside open file table
  public:
   int ref_count_;
   spinlock ref_count_lock_;
@@ -26,14 +30,14 @@ class file {
   void vfs_close();
  private:
   int perm_;
-  int offset_;
+  size_t offset_;
   vnode* vnode_;
 };
 
 class kb_c_vnode: public vnode {
  public:
-  ssize_t read(char* buf, size_t sz);
-  ssize_t write(char* buf, size_t sz);
+  ssize_t read(char* buf, size_t sz, size_t offset);
+  ssize_t write(char* buf, size_t sz, size_t offset);
   void close();
 };
 
@@ -65,8 +69,8 @@ class pipe_vnode: public vnode {
   bool is_read_;
  public:
   pipe_vnode(pipe* underlying_pipe, bool is_read);
-  ssize_t read(char* buf, size_t sz);
-  ssize_t write(char* buf, size_t sz);
+  ssize_t read(char* buf, size_t sz, size_t offset);
+  ssize_t write(char* buf, size_t sz, size_t offset);
   void close();
 };
 

@@ -57,7 +57,6 @@ void proc::copy_fd_table_from_proc(proc* source) {
         if (file) {
             spinlock_guard guard(file->ref_count_lock_);
             file->ref_count_++;
-            log_printf("TEST %p refcount: %d\n", file, file->ref_count_);
             fd_table_[i] = file;
         }
     }

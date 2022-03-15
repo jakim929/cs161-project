@@ -288,6 +288,9 @@ uintptr_t proc::run_syscall(regstate* regs) {
     case SYSCALL_FORK:
         return syscall_fork(regs);
 
+    case SYSCALL_OPEN:
+        return syscall_open(regs);
+
     case SYSCALL_READ:
         return syscall_read(regs);
 
@@ -438,7 +441,6 @@ int proc::syscall_msleep(regstate* regs) {
 proc* proc::get_child(pid_t pid) {
     proc* child = nullptr;
     for (proc* p = children_list_.front(); p; p = children_list_.next(p)) {
-        log_printf("proc[%d] finding test %d\n", id_, p->id_);
         if (p->id_ == pid) {
             child = p;
             break;
@@ -568,6 +570,63 @@ int proc::close_fd(int fd, spinlock_guard& guard) {
     return 0;
 }
 
+bool proc::is_valid_pathname(uintptr_t pathname) {
+    vmiter it(this, pathname);
+    if (!it.user()) {
+        return false;
+    }
+    char* name = reinterpret_cast<char*>(pathname);
+    // max name size currently allowed is 64;
+    if (name[0] == '\0') {
+        return false;
+    }
+    for (int i = 1; i < 64; i++) {
+        vmiter it2(this, reinterpret_cast<uintptr_t>(&name[i]));
+        if (!it2.user()) {
+            return false;
+        }
+        if (name[i] == '\0') {
+            return true;
+        } 
+    }
+
+    return false;
+}
+
+int proc::syscall_open(regstate* regs) {
+    uintptr_t pathname_ptr = regs->reg_rdi;
+    uint64_t flag = regs->reg_rsi;
+    if (!is_valid_pathname(pathname_ptr)) {
+        return E_FAULT;
+    }
+
+    char* pathname = reinterpret_cast<char*>(pathname_ptr);
+
+    int memfile_id = memfile::initfs_lookup(pathname, flag & OF_CREATE);
+    if (memfile_id < 0) {
+        return memfile_id;
+    }
+
+    memfile* found_memfile = &memfile::initfs[memfile_id];
+
+    if (flag & OF_TRUNC) {
+        memfile::initfs[memfile_id].set_length(0);
+    }
+
+    // TODO: cleanup on failure
+    vnode* v = knew<memfile_vnode>(found_memfile);
+    uint64_t is_read = (flag & OF_READ) ? VFS_FILE_READ : 0;
+    uint64_t is_write = (flag & OF_WRITE) ? VFS_FILE_WRITE : 0;
+
+    file* f = knew<file>(v, is_read | is_write);
+
+    int fd = assign_to_open_fd(f);
+    if (fd < 0) {
+        return E_NFILE;
+    }
+    return fd;
+}
+
 int proc::syscall_close(regstate* regs) {
     int fd = regs->reg_rdi;
     assert(fd >= 0 && fd < N_FILE_DESCRIPTORS);
@@ -605,6 +664,16 @@ int proc::get_open_fd(spinlock_guard& guard) {
         }
     }
     return -1;
+}
+
+int proc::assign_to_open_fd(file* f) {
+    spinlock_guard guard(fd_table_lock_);
+    int open_fd = get_open_fd(guard);
+    if (open_fd < 0) {
+        return -1;
+    }
+    fd_table_[open_fd] = f;
+    return open_fd;
 }
 
 uint64_t proc::syscall_pipe(regstate* regs) {

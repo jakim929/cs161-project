@@ -346,3 +346,29 @@ ssize_t memfile_loader::get_page(uint8_t** pg, size_t off) {
 void memfile_loader::put_page() {
     // no need to do anything
 }
+
+/*
+    memfile_vnode: vnode sub-class for memfiles
+*/
+memfile_vnode::memfile_vnode(memfile* underlying_memfile)
+    : memfile_(underlying_memfile) {
+}
+
+ssize_t memfile_vnode::read(char* buf, size_t sz, size_t offset) {
+    if (offset >= memfile_->len_) {
+        return 0;
+    }
+    size_t to_read = min(memfile_->len_ - offset, sz);
+    memcpy(buf, memfile_->data_ + offset, to_read);
+
+    return to_read;
+}
+
+ssize_t memfile_vnode::write(char* buf, size_t sz, size_t offset) {
+    return 0;
+}
+
+void memfile_vnode::close() {
+
+}
+

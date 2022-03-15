@@ -140,4 +140,14 @@ struct memfile_loader : public proc_loader {
     void put_page() override;
 };
 
+class memfile_vnode: public vnode {
+  public:
+    memfile_vnode(memfile* underlying_memfile);
+    ssize_t read(char* buf, size_t sz, size_t offset);
+    ssize_t write(char* buf, size_t sz, size_t offset);
+    void close();
+  private:
+    memfile* memfile_;
+};
+
 #endif
