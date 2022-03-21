@@ -103,6 +103,8 @@ struct __attribute__((aligned(4096))) proc {
     uintptr_t syscall_write(regstate* reg);
     uintptr_t syscall_readdiskfile(regstate* reg);
 
+    int syscall_execv(regstate* reg);
+
     int syscall_dup2(regstate* reg);
     int syscall_close(regstate* reg);
     uint64_t syscall_pipe(regstate* reg);
@@ -118,6 +120,7 @@ struct __attribute__((aligned(4096))) proc {
     proc* get_any_exited_child();
 
     bool is_valid_pathname(uintptr_t pathname);
+    bool is_valid_argument(uintptr_t argv, int argc);
 
     int waitpid(pid_t pid, int* stat, int options);
 

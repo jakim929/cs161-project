@@ -338,6 +338,9 @@ uintptr_t proc::run_syscall(regstate* regs) {
     case SYSCALL_PIPE:
         return syscall_pipe(regs);
 
+    case SYSCALL_EXECV:
+        return syscall_execv(regs);
+
     case SYSCALL_NASTYALLOC:
         return syscall_nastyalloc(1000);
 
@@ -571,6 +574,9 @@ int proc::close_fd(int fd, spinlock_guard& guard) {
 }
 
 bool proc::is_valid_pathname(uintptr_t pathname) {
+    if (!pathname) {
+        return false;
+    }
     vmiter it(this, pathname);
     if (!it.user()) {
         return false;
@@ -698,6 +704,123 @@ uint64_t proc::syscall_pipe(regstate* regs) {
     fd_table_[write_fd] = pipe_write_file;
 
     return ((uint64_t) read_fd) | (((uint64_t) write_fd) << 32);
+}
+
+bool proc::is_valid_argument(uintptr_t argv, int argc) {
+    if (argv == 0 || argc == 0) {
+        log_printf("is_valid_argument fails part 1\n");
+        return false;
+    }
+
+    if (!vmiter(this, argv).range_perm(sizeof(uintptr_t) * (argc + 1), PTE_P | PTE_U)) {
+        log_printf("is_valid_argument fails part 2\n");
+        return false;
+    }
+    
+    char** args = reinterpret_cast<char**>(argv);
+    for (int i = 0; i < argc; i++) {
+        if (args[i] == nullptr) {
+            log_printf("is_valid_argument fails part 3\n");
+            return false;
+        }
+    }
+    if (args[argc] != nullptr) {
+        log_printf("is_valid_argument fails part 4\n");
+        return false;
+    }
+
+    return true;
+}
+
+// proc::syscall_execv(regs)
+//    Handle execv system call.
+
+int proc::syscall_execv(regstate* regs) {
+    uintptr_t pathname_ptr = regs->reg_rdi;
+    uintptr_t argv = regs->reg_rsi;
+    int argc = regs->reg_rdx;
+
+    int error_code = 0;
+    char* pathname;
+    int memfile_id;
+    x86_64_pagetable* old_pagetable = pagetable_;
+    x86_64_pagetable* new_pagetable;
+    void* new_stack_page;
+    uint64_t entry_rip;
+
+    if (!is_valid_pathname(pathname_ptr)) {
+        error_code = E_FAULT;
+        goto bad_execv_return;
+    }
+
+    if (!is_valid_argument(argv, argc)) {
+        error_code = E_FAULT;
+        goto bad_execv_return;
+    }
+
+    pathname = reinterpret_cast<char*>(pathname_ptr);
+
+    memfile_id = memfile::initfs_lookup(pathname);
+    if (memfile_id < 0) {
+        error_code = E_NOENT;
+        goto bad_execv_return;
+    }
+
+    new_pagetable = kalloc_pagetable();
+    if (!new_pagetable) {
+        error_code = E_NOMEM;
+        goto bad_execv_return;
+    }
+    
+    {
+        memfile_loader ld(memfile_id, new_pagetable);
+        assert(ld.memfile_ && ld.pagetable_);
+        int r = proc::load(ld);
+
+        if (r < 0) {
+            error_code = r;
+            goto bad_execv_free_page_table;
+        }
+        entry_rip = ld.entry_rip_;
+    }
+
+    {
+        new_stack_page = kalloc(PAGESIZE);
+        if (vmiter(new_pagetable, MEMSIZE_VIRTUAL - PAGESIZE).try_map(new_stack_page, PTE_PWU) < 0) {
+            error_code = E_NOMEM;
+            goto bad_execv_free_stack;
+        }
+
+        if (
+          vmiter(new_pagetable, CONSOLE_ADDR).try_map(CONSOLE_ADDR, PTE_PWU) < 0) {
+            error_code = E_NOMEM;
+            goto bad_execv_free_stack;
+        }
+    }
+
+    init_user(id_, ppid_, new_pagetable);
+    regs_->reg_rsp = MEMSIZE_VIRTUAL;
+    regs_->reg_rip = entry_rip;
+
+
+    set_pagetable(new_pagetable);
+    kfree_all_user_mappings(old_pagetable);
+    kfree_pagetable(old_pagetable);
+
+    yield_noreturn();
+
+    bad_execv_free_stack: {
+        kfree(new_stack_page);
+    }
+
+    bad_execv_free_page_table: {
+        kfree_pagetable(new_pagetable);
+    }
+
+    bad_execv_return: {
+
+    }
+    return error_code;
 }
 
 // proc::syscall_fork(regs)
