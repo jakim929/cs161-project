@@ -115,6 +115,7 @@ void boot_process_start(pid_t pid, pid_t ppid, const char* name) {
     // allocate process, initialize memory
     proc* p = knew<proc>();
     p->init_user(pid, ppid, ld.pagetable_);
+    p->init_fd_table();
     p->regs_->reg_rip = ld.entry_rip_;
 
     // not locking because init process MUST exist
@@ -573,6 +574,15 @@ int proc::close_fd(int fd, spinlock_guard& guard) {
     return 0;
 }
 
+bool proc::is_valid_string(char* str, size_t max_char) {
+    for (int i = 0; i < max_char; i++) {
+        if (str[i] == '\0') {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool proc::is_valid_pathname(uintptr_t pathname) {
     if (!pathname) {
         return false;
@@ -719,6 +729,10 @@ bool proc::is_valid_argument(uintptr_t argv, int argc) {
     
     char** args = reinterpret_cast<char**>(argv);
     for (int i = 0; i < argc; i++) {
+        if (!is_valid_string(args[i], 64)) {
+            log_printf("is_valid_argument fails part 2.9\n");
+            return false;
+        }
         if (args[i] == nullptr) {
             log_printf("is_valid_argument fails part 3\n");
             return false;
@@ -730,6 +744,31 @@ bool proc::is_valid_argument(uintptr_t argv, int argc) {
     }
 
     return true;
+}
+
+size_t proc::copy_argument(void* dest, uintptr_t dest_va, uintptr_t argv_val, int argc) {
+    char** argv = reinterpret_cast<char**>(argv_val);
+    size_t written = 0;
+    
+    size_t size_to_copy = sizeof(char*) * (argc + 1);
+    memcpy(dest, argv, size_to_copy);
+
+    char** copied_argv = (char**) dest;
+    written += size_to_copy;
+    
+    for (int i = 0; i < argc; i++) {
+        uintptr_t current_ptr = reinterpret_cast<uintptr_t>(dest) + written;
+        uintptr_t current_user_va = dest_va + written;
+        char* copied_str = reinterpret_cast<char*>(current_ptr);
+        // log_printf("%d base: [%p] copying_str copied_str: %p : %s [%p]\n", i, dest, copied_str, argv[i], &argv[i]);
+
+        memcpy(copied_str, argv[i], strlen(argv[i]) + 1);
+        copied_argv[i] = reinterpret_cast<char*>(current_user_va);
+        // log_printf("completed %d\n", i);
+        written += (strlen(copied_str) + 1);
+    }
+    
+    return written;
 }
 
 // proc::syscall_execv(regs)
@@ -802,6 +841,9 @@ int proc::syscall_execv(regstate* regs) {
     regs_->reg_rsp = MEMSIZE_VIRTUAL;
     regs_->reg_rip = entry_rip;
 
+    copy_argument(new_stack_page, MEMSIZE_VIRTUAL - PAGESIZE, argv, argc);
+    regs_->reg_rdi = argc;
+    regs_->reg_rsi = MEMSIZE_VIRTUAL - PAGESIZE;
 
     set_pagetable(new_pagetable);
     kfree_all_user_mappings(old_pagetable);
@@ -893,6 +935,7 @@ int proc::syscall_fork(regstate* regs) {
     }
 
     child->init_user(pid, id_, child_pagetable);
+    child->init_fd_table();
 
     {
         spinlock_guard guard(process_hierarchy_lock);
@@ -1045,15 +1088,20 @@ uintptr_t proc::syscall_write(regstate* regs) {
     // * Validate the write buffer.
 
     if (fd < 0 || fd >= N_FILE_DESCRIPTORS) {
+        log_printf("Testpoint1 \n");
         return E_BADF;
     }
 
     if (sz == 0) {
+        log_printf("Testpoint2 \n");
+
         return 0;
     }
 
     vmiter it(this, addr);
     if (!it.range_perm(sz, PTE_P | PTE_U)) {
+                log_printf("Testpoint3\n");
+
         return E_FAULT;
     }
 
@@ -1063,8 +1111,11 @@ uintptr_t proc::syscall_write(regstate* regs) {
         file = fd_table_[fd];
     }
     if (!file) {
+        log_printf("Testpoint4\n");
+
         return E_BADF;
     }
+    log_printf("about to write!\n");
     return file->vfs_write(reinterpret_cast<char*>(addr), sz);
 
     // auto& csl = consolestate::get();

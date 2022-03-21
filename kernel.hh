@@ -119,8 +119,13 @@ struct __attribute__((aligned(4096))) proc {
     proc* get_child(pid_t pid);
     proc* get_any_exited_child();
 
+    bool is_valid_string(char* str, size_t max_char);
     bool is_valid_pathname(uintptr_t pathname);
     bool is_valid_argument(uintptr_t argv, int argc);
+
+    void init_fd_table();
+
+    size_t copy_argument(void* dest, uintptr_t dest_va, uintptr_t argv_val, int argc);
 
     int waitpid(pid_t pid, int* stat, int options);
 
