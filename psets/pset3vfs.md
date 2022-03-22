@@ -3,24 +3,25 @@ CS 161 Problem Set 3 VFS Design Document
 
 ```
 class file {
+  // TODO: add index inside open file table
  public:
+  int id_; // index on global open file table
   int ref_count_;
   spinlock ref_count_lock_;
+  vnode* vnode_; // Only public so the memviewer can access it and mark it
   file(vnode* node, int perm);
   ssize_t vfs_read(char* buf, size_t sz);
   ssize_t vfs_write(char* buf, size_t sz);
   void vfs_close();
-
  private:
   int perm_;
-  int offset_;
-  vnode* vnode_;
+  size_t offset_;
 };
 
 class vnode {
  public:
-  virtual ssize_t read(char* buf, size_t sz);
-  virtual ssize_t write(char* buf, size_t sz);
+  virtual ssize_t read(char* buf, size_t sz, size_t offset);
+  virtual ssize_t write(char* buf, size_t sz, size_t offset);
   virtual void close();
 };
 
@@ -62,5 +63,7 @@ However, there is no need for holding the ref_count_lock when calling vfs_read o
 There are no locks implemented at the vnode abstraction level either, although the child implementations of vnodes may contain a lock. For instance, pipe_vnode contains a struct pipe, which contains a lock inside.
 
 vfs_write() and vfs_read() may block, but only if the underlying vnode implementation blocks. For instance, pipe_vnode blocks when there is nothing to read yet. However, the file object doesn't know the underlying implementation of the vnodes, so it doesn't know if it blocks or not.
+
+vfs_write() and vfs_read() updates the offset_ at the file abstraction layer, then passes the current offset when calling the underlying vnode's read and write functions
 
 Right now there is no multithreading for a single process, but if there were, we need to make sure that there are no race conditions when accessing a file inside the fd_table_. For instance, if two threads in a single process accesses the fd_table_[4] simultaneously, and thread 1 tries to close while thread 2 tries to write, the behavior is undefined. We need to add a lock to each of the file descriptors inside fd_table_ per process, that is locked while one thread is trying to use a file descriptor. ie) we can add `spinlock fd_locks_[N_FILE_DESCRIPTORS]` to the table.

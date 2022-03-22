@@ -4,22 +4,14 @@
 #define VFS_FILE_READ           000000000200
 #define VFS_FILE_WRITE          000000000400
 
-// TODO: After memfs, i had to add offset in order to keep track of last read position
-// this is tracked in the file::read level
 class vnode {
  public:
   virtual ssize_t read(char* buf, size_t sz, size_t offset);
   virtual ssize_t write(char* buf, size_t sz, size_t offset);
-  // TODO: Change made during pipe:: change from close() to close_read and close_write
-  // virtual void close_read();
-  // virtual void close_write();
   virtual void close();
-
-  // TODO: Change made during pipe:: a vnode only has one link from a open descriptor
 };
 
 class file {
-  // TODO: add index inside open file table
  public:
   int id_; // index on global open file table
   int ref_count_;

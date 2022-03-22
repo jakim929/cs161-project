@@ -21,9 +21,12 @@ This also helps enforce the design that a single vnode is only pointed to by one
 Part D.
 I created a global initfs_lock_ that locks the initfs table. It is locked inside initfs_lookup before looking up a file / creating it. Because we don't have a way to "delete" initfs files, we just need to lock for the race condition where two processes are trying to write (create) to the same slot in the table.
 
+
 Accessing the table through a table index (returned by initfs_lookup) should not require locking, since it's not possible yet to delete a memfile yet, and there aren't race conditions for read.
 
-No significant changes were made to my VFS design.
+I also added the offset_ variable to file class to keep track of current read offsets. This value is passed to the vnode when calling vnode::read or vnode::write so the vnode can read the appropriate point.
+
+I updated test_memfs to check for syscall_write as well.
 
 Grading notes
 -------------
