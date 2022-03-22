@@ -84,7 +84,6 @@ ssize_t kb_c_vnode::read(char* buf, size_t sz, size_t offset) {
 }
 
 ssize_t kb_c_vnode::write(char* buf, size_t sz, size_t offset) {
-  log_printf("TESTING! %zu\n", sz);
     auto& csl = consolestate::get();
     spinlock_guard guard(csl.lock_);
     size_t n = 0;

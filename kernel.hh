@@ -132,6 +132,7 @@ struct __attribute__((aligned(4096))) proc {
     void init_fd_table();
 
     size_t copy_argument(void* dest, uintptr_t dest_va, uintptr_t argv_val, int argc);
+    size_t copy_argument_to_stack_end(uintptr_t stack_end, uintptr_t stack_end_va, uintptr_t argv_val, int argc);
 
     int waitpid(pid_t pid, int* stat, int options);
 
