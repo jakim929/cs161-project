@@ -358,6 +358,7 @@ memfile_vnode::memfile_vnode(memfile* underlying_memfile)
 }
 
 ssize_t memfile_vnode::read(char* buf, size_t sz, size_t offset) {
+    spinlock_guard guard(memfile_->lock_);
     if (offset >= memfile_->len_) {
         return 0;
     }
@@ -368,6 +369,7 @@ ssize_t memfile_vnode::read(char* buf, size_t sz, size_t offset) {
 }
 
 ssize_t memfile_vnode::write(char* buf, size_t sz, size_t offset) {
+    spinlock_guard guard(memfile_->lock_);
     int res = memfile_->set_length(memfile_->len_ + sz);
     if (res != 0) {
         return E_NOSPC;

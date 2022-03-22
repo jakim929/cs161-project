@@ -111,6 +111,11 @@ struct __attribute__((aligned(4096))) proc {
 
     int get_open_fd(spinlock_guard& guard);
     int assign_to_open_fd(file* f);
+    int assign_to_open_fd(file* f, spinlock_guard& guard);
+
+    int get_available_open_file_table_id(spinlock_guard& guard);
+    int add_to_open_file_table(file* f);
+    int add_to_open_file_table(file* f, spinlock_guard& guard);
 
     int close_fd(int fd, spinlock_guard& guard);
 
@@ -122,6 +127,7 @@ struct __attribute__((aligned(4096))) proc {
     bool is_valid_string(char* str, size_t max_char);
     bool is_valid_pathname(uintptr_t pathname);
     bool is_valid_argument(uintptr_t argv, int argc);
+    bool is_valid_fd(int fd);
 
     void init_fd_table();
 

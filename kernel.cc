@@ -82,7 +82,9 @@ void init_process_start(pid_t pid, pid_t ppid) {
     }
 
     kb_c_vnode* keyboard_console_vnode = knew<kb_c_vnode>();
+    assert(keyboard_console_vnode);
     file* kbc_file = knew<file>(keyboard_console_vnode, VFS_FILE_READ | VFS_FILE_WRITE);
+    assert(kbc_file);
     {
         spinlock_guard guard(open_file_table_lock);
         assert(!open_file_table[0]);
@@ -565,7 +567,6 @@ int proc::close_fd(int fd, spinlock_guard& guard) {
                         break;
                     }
                 }
-
             }
             open_file->vfs_close();
             kfree(open_file);
@@ -609,7 +610,31 @@ bool proc::is_valid_pathname(uintptr_t pathname) {
     return false;
 }
 
+int proc::get_available_open_file_table_id(spinlock_guard& guard) {
+    for (int i = 0; i < N_GLOBAL_OPEN_FILES; i++) {
+        if (open_file_table[i] == nullptr) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+int proc::add_to_open_file_table(file* f) {
+    spinlock_guard guard(open_file_table_lock);
+    return add_to_open_file_table(f, guard);
+}
+
+int proc::add_to_open_file_table(file* f, spinlock_guard& guard) {
+    int id = get_available_open_file_table_id(guard);
+    if (id < 0) {
+        return -1;
+    }
+    open_file_table[id] = f;
+    return id;
+}
+
 int proc::syscall_open(regstate* regs) {
+    int errno;
     uintptr_t pathname_ptr = regs->reg_rdi;
     uint64_t flag = regs->reg_rsi;
     if (!is_valid_pathname(pathname_ptr)) {
@@ -626,21 +651,66 @@ int proc::syscall_open(regstate* regs) {
     memfile* found_memfile = &memfile::initfs[memfile_id];
 
     if (flag & OF_TRUNC) {
-        memfile::initfs[memfile_id].set_length(0);
+        spinlock_guard guard(found_memfile->lock_);
+        found_memfile->set_length(0);
     }
 
-    // TODO: cleanup on failure
-    vnode* v = knew<memfile_vnode>(found_memfile);
+    vnode* v;
+    file* f;
+    int open_file_id = -1;
+    int fd = -1;
     uint64_t is_read = (flag & OF_READ) ? VFS_FILE_READ : 0;
     uint64_t is_write = (flag & OF_WRITE) ? VFS_FILE_WRITE : 0;
 
-    file* f = knew<file>(v, is_read | is_write);
+    // TODO: cleanup on failure
+    v = knew<memfile_vnode>(found_memfile);
+    if (!v) {
+        errno = E_NOMEM;
+        goto open_fail_return;
+    }
 
-    int fd = assign_to_open_fd(f);
+    f = knew<file>(v, is_read | is_write);
+    if (!f) {
+        errno = E_NOMEM;
+        goto open_fail_free_vnode;
+    }
+    
+    open_file_id = add_to_open_file_table(f);
+    if (open_file_id < 0) {
+        errno = E_NFILE;
+        goto open_fail_free_file;
+    }
+
+    fd = assign_to_open_fd(f);
     if (fd < 0) {
         return E_NFILE;
+        goto open_fail_free_open_file_table_slot;
     }
     return fd;
+
+    open_fail_free_fd_table_slot: {
+        spinlock_guard guard(fd_table_lock_);
+        fd_table_[fd] = nullptr;
+    }
+
+    open_fail_free_open_file_table_slot: {
+        spinlock_guard guard(open_file_table_lock);
+        open_file_table[open_file_id] = nullptr;
+    }
+
+    open_fail_free_file: {
+        kfree(f);
+    }
+
+    open_fail_free_vnode: {
+        kfree(v);
+    }
+    
+    open_fail_return : {
+
+    }
+
+    return errno;
 }
 
 int proc::syscall_close(regstate* regs) {
@@ -650,13 +720,22 @@ int proc::syscall_close(regstate* regs) {
     return close_fd(fd, guard);
 }
 
+bool proc::is_valid_fd(int fd) {
+    return fd >= 0 && fd < N_FILE_DESCRIPTORS;
+}
+
 int proc::syscall_dup2(regstate* regs) {
     int oldfd = regs->reg_rdi;
     int newfd = regs->reg_rsi;
+
+    if (!is_valid_fd(oldfd) || !is_valid_fd(oldfd)) {
+        return E_BADF;
+    }
+
     spinlock_guard guard(fd_table_lock_);
     file* file_to_dup = fd_table_[oldfd];
     file* open_file = fd_table_[newfd];
-
+    
     if (!file_to_dup) {
         return E_BADF;
     }
@@ -684,6 +763,10 @@ int proc::get_open_fd(spinlock_guard& guard) {
 
 int proc::assign_to_open_fd(file* f) {
     spinlock_guard guard(fd_table_lock_);
+    return assign_to_open_fd(f, guard);
+}
+
+int proc::assign_to_open_fd(file* f, spinlock_guard& guard) {
     int open_fd = get_open_fd(guard);
     if (open_fd < 0) {
         return -1;
@@ -693,27 +776,66 @@ int proc::assign_to_open_fd(file* f) {
 }
 
 uint64_t proc::syscall_pipe(regstate* regs) {
+    int errno;
+    int read_fd = -1;
+    int write_fd = -1;
+    int read_file_id = -1;
+    int write_file_id = -1;
+
     pipe* new_pipe = knew<pipe>();
     pipe_vnode* pipe_read_vnode = knew<pipe_vnode>(new_pipe, true);
     file* pipe_read_file = knew<file>(pipe_read_vnode, VFS_FILE_READ);
-
     pipe_vnode* pipe_write_vnode = knew<pipe_vnode>(new_pipe, false);
     file* pipe_write_file = knew<file>(pipe_write_vnode, VFS_FILE_WRITE);
 
-    spinlock_guard guard(fd_table_lock_);
-    int read_fd = get_open_fd(guard);
-    if (read_fd < 0) {
-        return E_NFILE;
+
+    if (!new_pipe || !pipe_read_vnode || !pipe_read_file || !pipe_write_vnode || !pipe_write_file) {
+        errno = E_NOMEM;
+        goto pipe_fail_free_objects;
     }
-    fd_table_[read_fd] = pipe_read_file;
-    
-    int write_fd = get_open_fd(guard);
-    if (write_fd < 0) {
-        return E_NFILE;
+    {
+        spinlock_guard fd_table_guard(fd_table_lock_);
+        read_fd = assign_to_open_fd(pipe_read_file, fd_table_guard);
+        write_fd = assign_to_open_fd(pipe_write_file, fd_table_guard);
+        if (write_fd < 0 || read_fd < 0) {
+            errno = E_NFILE;
+            goto pipe_fail_free_fd_table;
+        }
     }
-    fd_table_[write_fd] = pipe_write_file;
+
+    {
+        spinlock_guard open_file_table_guard(open_file_table_lock);
+        read_file_id = add_to_open_file_table(pipe_read_file, open_file_table_guard);
+        write_file_id = add_to_open_file_table(pipe_write_file, open_file_table_guard);
+        if (write_fd < 0 || read_fd < 0) {
+            errno = E_NFILE;
+            goto pipe_fail_free_open_table;
+        }
+    }
+
 
     return ((uint64_t) read_fd) | (((uint64_t) write_fd) << 32);
+
+    pipe_fail_free_open_table: {
+        spinlock_guard open_file_table_guard(open_file_table_lock);
+        if (read_file_id >= 0) open_file_table[read_file_id] = nullptr;
+        if (write_file_id >= 0) open_file_table[write_file_id] = nullptr;
+    }
+
+    pipe_fail_free_fd_table: {
+        spinlock_guard fd_table_guard(fd_table_lock_);
+        if (read_fd >= 0) fd_table_[read_fd] = nullptr;
+        if (write_fd >= 0) fd_table_[write_fd] = nullptr;
+    }
+
+    pipe_fail_free_objects: {
+        if (new_pipe) kfree(new_pipe);
+        if (pipe_read_vnode) kfree(pipe_read_vnode);
+        if (pipe_read_file) kfree(pipe_read_file);
+        if (pipe_write_vnode) kfree(pipe_write_vnode);
+        if (pipe_write_file) kfree(pipe_write_file);
+    }
+    return errno;
 }
 
 bool proc::is_valid_argument(uintptr_t argv, int argc) {
@@ -1110,6 +1232,8 @@ uintptr_t proc::syscall_write(regstate* regs) {
         spinlock_guard fd_table_guard(fd_table_lock_);
         file = fd_table_[fd];
     }
+
+    // No need to keep holding fd_table_guard because the file will not get deleted while you're reading it (ref count will never be 0)
     if (!file) {
         log_printf("Testpoint4\n");
 
