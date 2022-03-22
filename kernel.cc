@@ -809,7 +809,6 @@ uint64_t proc::syscall_pipe(regstate* regs) {
         }
     }
 
-
     return ((uint64_t) read_fd) | (((uint64_t) write_fd) << 32);
 
     pipe_fail_free_open_table: {
@@ -864,7 +863,7 @@ bool proc::is_valid_argument(uintptr_t argv, int argc) {
     return true;
 }
 
-size_t proc::copy_argument_to_stack_end(uintptr_t stack_end, uintptr_t stack_end_va, uintptr_t argv_val, int argc) {
+ssize_t proc::copy_argument_to_stack_end(uintptr_t stack_end, uintptr_t stack_end_va, uintptr_t argv_val, int argc) {
     char* argv_copy[argc + 1];
     argv_copy[argc] = nullptr;
     char** argv = reinterpret_cast<char**>(argv_val);
@@ -873,41 +872,23 @@ size_t proc::copy_argument_to_stack_end(uintptr_t stack_end, uintptr_t stack_end
     for (int i = argc - 1; i >= 0; i--) {
         size_t str_size = strlen(argv[i]) + 1;
         uintptr_t dest = stack_end - written - str_size;
-        memcpy(reinterpret_cast<void*>(dest), argv[i], str_size);
-        argv_copy[i] = reinterpret_cast<char*>(stack_end_va - written - str_size);
+        uintptr_t dest_va = stack_end_va - written - str_size;
         written += str_size;
+        if (written > PAGESIZE) {
+            return -1;
+        }
+        memcpy(reinterpret_cast<void*>(dest), argv[i], str_size);
+        argv_copy[i] = reinterpret_cast<char*>(dest_va);
     }
 
     size_t argv_size = sizeof(char*) * (argc + 1);
     uintptr_t argv_dest = stack_end - written - argv_size;
+    written += argv_size;
+    if (written > PAGESIZE) {
+        return -1;
+    }
     memcpy(reinterpret_cast<void*>(argv_dest), argv_copy, argv_size);
 
-    written += argv_size;
-    return written;
-}
-
-size_t proc::copy_argument(void* dest, uintptr_t dest_va, uintptr_t argv_val, int argc) {
-    char** argv = reinterpret_cast<char**>(argv_val);
-    size_t written = 0;
-    
-    size_t size_to_copy = sizeof(char*) * (argc + 1);
-    memcpy(dest, argv, size_to_copy);
-
-    char** copied_argv = (char**) dest;
-    written += size_to_copy;
-    
-    for (int i = 0; i < argc; i++) {
-        uintptr_t current_ptr = reinterpret_cast<uintptr_t>(dest) + written;
-        uintptr_t current_user_va = dest_va + written;
-        char* copied_str = reinterpret_cast<char*>(current_ptr);
-        // log_printf("%d base: [%p] copying_str copied_str: %p : %s [%p]\n", i, dest, copied_str, argv[i], &argv[i]);
-
-        memcpy(copied_str, argv[i], strlen(argv[i]) + 1);
-        copied_argv[i] = reinterpret_cast<char*>(current_user_va);
-        // log_printf("completed %d\n", i);
-        written += (strlen(copied_str) + 1);
-    }
-    
     return written;
 }
 
@@ -981,6 +962,11 @@ int proc::syscall_execv(regstate* regs) {
     init_user(id_, ppid_, new_pagetable);
 
     written = copy_argument_to_stack_end(reinterpret_cast<uintptr_t>(new_stack_page) + PAGESIZE, MEMSIZE_VIRTUAL, argv, argc);
+    if (written < 0) {
+        // written < 0 if size of argument is larger than stack
+        goto bad_execv_free_stack;
+    }
+    
     regs_->reg_rdi = argc;
     regs_->reg_rsi = MEMSIZE_VIRTUAL - written;
 

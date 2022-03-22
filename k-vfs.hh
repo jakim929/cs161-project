@@ -24,6 +24,7 @@ class file {
   int id_; // index on global open file table
   int ref_count_;
   spinlock ref_count_lock_;
+  vnode* vnode_; // Only public so the memviewer can access it and mark it
   file(vnode* node, int perm);
   ssize_t vfs_read(char* buf, size_t sz);
   ssize_t vfs_write(char* buf, size_t sz);
@@ -31,7 +32,6 @@ class file {
  private:
   int perm_;
   size_t offset_;
-  vnode* vnode_;
 };
 
 class kb_c_vnode: public vnode {
@@ -73,24 +73,5 @@ class pipe_vnode: public vnode {
   ssize_t write(char* buf, size_t sz, size_t offset);
   void close();
 };
-
-// class pipe_vnode: public vnode {
-//  public:
-//   void init();
-//   ssize_t read(char* buf, size_t sz);
-//   ssize_t write(char* buf, size_t sz);
-//   void close_read();
-//   void close_write();
-
-//  private:
-//   char bbuf_[PIPE_BOUNDED_BUFFER_SIZE];
-//   size_t bsize_ = PIPE_BOUNDED_BUFFER_SIZE;
-//   size_t bpos_ = 0;
-//   size_t blen_ = 0;
-//   spinlock lock_;
-//   wait_queue wq_;
-//   bool write_open_;
-//   bool read_open_;
-// };
 
 #endif
