@@ -19,9 +19,9 @@ class vnode {
 };
 
 class file {
-
   // TODO: add index inside open file table
  public:
+  int id_; // index on global open file table
   int ref_count_;
   spinlock ref_count_lock_;
   file(vnode* node, int perm);

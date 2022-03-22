@@ -89,6 +89,7 @@ void init_process_start(pid_t pid, pid_t ppid) {
         spinlock_guard guard(open_file_table_lock);
         assert(!open_file_table[0]);
         open_file_table[0] = kbc_file;
+        kbc_file->id_ = 0;
     }
     for (int i = 0; i < N_FILE_DESCRIPTORS; i++) {
         p->fd_table_[i] = nullptr;
@@ -560,13 +561,7 @@ int proc::close_fd(int fd, spinlock_guard& guard) {
             // no one should be using vnode at this point
             {
                 spinlock_guard open_file_table_guard(open_file_table_lock);
-                for (int i = 0; i < N_GLOBAL_OPEN_FILES; i++) {
-                    // Optimize so you don't have to go through entire table
-                    if (open_file_table[i] == open_file) {
-                        open_file_table[i] = nullptr;
-                        break;
-                    }
-                }
+                open_file_table[open_file->id_] = nullptr;
             }
             open_file->vfs_close();
             kfree(open_file);
@@ -630,6 +625,7 @@ int proc::add_to_open_file_table(file* f, spinlock_guard& guard) {
         return -1;
     }
     open_file_table[id] = f;
+    f->id_ = id;
     return id;
 }
 

@@ -17,7 +17,6 @@ file::file(vnode* node, int perm)
 
 ssize_t file::vfs_read(char* buf, size_t sz) {
     if (!(perm_ & VFS_FILE_READ)) {
-        log_printf("RETURINING AT PERMCHECK! \n");
         return E_BADF;
     }
     ssize_t read = vnode_->read(buf, sz, offset_);
