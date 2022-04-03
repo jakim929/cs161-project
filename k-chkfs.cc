@@ -431,3 +431,37 @@ void inode_loader::put_page() {
     }
 }
 
+inode_vnode::inode_vnode(chkfs::inode* underlying_inode)
+    : inode_(underlying_inode) {
+}
+
+ssize_t inode_vnode::read(char* buf, size_t sz, size_t offset) {
+    inode_->lock_read();
+    chkfs_fileiter it(inode_);
+
+    size_t read_bytes = 0;
+
+    while (read_bytes < sz && offset + read_bytes < inode_->size) {
+        bcentry* b = it.find(offset + read_bytes).get_disk_entry();
+        if (!b) {
+            inode_->unlock_read();
+            return -1;
+        }
+        size_t block_offset = it.block_relative_offset();
+        size_t to_read = min(inode_->size - read_bytes - offset, sz - read_bytes, size_t(chkfs::blocksize - block_offset));
+        memcpy(buf + read_bytes, b->buf_ + block_offset, to_read);
+        read_bytes += to_read;
+        b->put();
+    }
+    
+    inode_->unlock_read();
+    return read_bytes;
+}
+
+ssize_t inode_vnode::write(char* buf, size_t sz, size_t offset) {
+    
+}
+
+void inode_vnode::close() {
+    inode_->put();
+}

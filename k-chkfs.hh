@@ -151,4 +151,14 @@ struct inode_loader : public proc_loader {
     void put_page() override;
 };
 
+struct inode_vnode: public vnode {
+  public:
+    inode_vnode(chkfs::inode* underlying_inode);
+    ssize_t read(char* buf, size_t sz, size_t offset);
+    ssize_t write(char* buf, size_t sz, size_t offset);
+    void close();
+  private:
+    chkfs::inode* inode_;
+};
+
 #endif

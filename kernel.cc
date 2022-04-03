@@ -639,16 +639,11 @@ int proc::syscall_open(regstate* regs) {
 
     char* pathname = reinterpret_cast<char*>(pathname_ptr);
 
-    int memfile_id = memfile::initfs_lookup(pathname, flag & OF_CREATE);
-    if (memfile_id < 0) {
-        return memfile_id;
-    }
+    chkfsstate::inode* ino = nullptr;
+    ino = chkfsstate::get().lookup_inode(pathname);
 
-    memfile* found_memfile = &memfile::initfs[memfile_id];
-
-    if (flag & OF_TRUNC) {
-        spinlock_guard guard(found_memfile->lock_);
-        found_memfile->set_length(0);
+    if (!ino) {
+        return E_NOENT;
     }
 
     vnode* v;
@@ -659,7 +654,7 @@ int proc::syscall_open(regstate* regs) {
     uint64_t is_write = (flag & OF_WRITE) ? VFS_FILE_WRITE : 0;
 
     // TODO: cleanup on failure
-    v = knew<memfile_vnode>(found_memfile);
+    v = knew<inode_vnode>(ino);
     if (!v) {
         errno = E_NOMEM;
         goto open_fail_return;
@@ -903,7 +898,6 @@ int proc::syscall_execv(regstate* regs) {
 
     int error_code = 0;
     char* pathname;
-    int memfile_id;
 
     chkfsstate::inode* ino = nullptr;
 
@@ -924,23 +918,23 @@ int proc::syscall_execv(regstate* regs) {
 
     pathname = reinterpret_cast<char*>(pathname_ptr);
 
+    new_pagetable = kalloc_pagetable();
+    if (!new_pagetable) {
+        error_code = E_NOMEM;
+        goto bad_execv_return;
+    }
+
     ino = chkfsstate::get().lookup_inode(pathname);
     if (!ino) {
         error_code = E_NOENT;
         goto bad_execv_return;
     }
 
-    new_pagetable = kalloc_pagetable();
-    if (!new_pagetable) {
-        error_code = E_NOMEM;
-        goto bad_execv_return;
-    }
-    
     {
         inode_loader ld(ino, new_pagetable);
         assert(ld.inode_ && ld.pagetable_);
         int r = proc::load(ld);
-
+        ino->put();
         if (r < 0) {
             error_code = r;
             goto bad_execv_free_page_table;
