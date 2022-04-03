@@ -141,4 +141,14 @@ inline void bcentry::clear() {
     }
 }
 
+struct inode_loader : public proc_loader {
+    chkfs::inode* inode_;
+    bcentry* bcentry_;
+    inline inode_loader(chkfs::inode* ino, x86_64_pagetable* pt)
+        : proc_loader(pt), inode_(ino) {
+    }
+    ssize_t get_page(uint8_t** pg, size_t off) override;
+    void put_page() override;
+};
+
 #endif

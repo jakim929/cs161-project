@@ -400,3 +400,34 @@ auto chkfsstate::allocate_extent(unsigned count) -> blocknum_t {
     // Your code here
     return E_INVAL;
 }
+
+// inode_loader functions
+
+ssize_t inode_loader::get_page(uint8_t** pg, size_t off) {
+    if (!inode_) {
+        return E_NOENT;
+    } else if (off >= inode_->size) {
+        return 0;
+    } else {
+        inode_->lock_read();
+        chkfs_fileiter it(inode_);
+
+        if (bcentry_ = it.find(off).get_disk_entry()) {
+            unsigned b = it.block_relative_offset();
+            *pg = bcentry_->buf_ + b;
+            
+            inode_->unlock_read();
+            return size_t(chkfs::blocksize - b);
+        } else {
+            inode_->unlock_read();
+            return -1;
+        }
+    }
+}
+
+void inode_loader::put_page() {
+    if (bcentry_) {
+        bcentry_->put();
+    }
+}
+

@@ -904,6 +904,9 @@ int proc::syscall_execv(regstate* regs) {
     int error_code = 0;
     char* pathname;
     int memfile_id;
+
+    chkfsstate::inode* ino = nullptr;
+
     x86_64_pagetable* old_pagetable = pagetable_;
     x86_64_pagetable* new_pagetable;
     void* new_stack_page;
@@ -921,8 +924,8 @@ int proc::syscall_execv(regstate* regs) {
 
     pathname = reinterpret_cast<char*>(pathname_ptr);
 
-    memfile_id = memfile::initfs_lookup(pathname);
-    if (memfile_id < 0) {
+    ino = chkfsstate::get().lookup_inode(pathname);
+    if (!ino) {
         error_code = E_NOENT;
         goto bad_execv_return;
     }
@@ -934,8 +937,8 @@ int proc::syscall_execv(regstate* regs) {
     }
     
     {
-        memfile_loader ld(memfile_id, new_pagetable);
-        assert(ld.memfile_ && ld.pagetable_);
+        inode_loader ld(ino, new_pagetable);
+        assert(ld.inode_ && ld.pagetable_);
         int r = proc::load(ld);
 
         if (r < 0) {
@@ -1217,20 +1220,15 @@ uintptr_t proc::syscall_write(regstate* regs) {
     // * Validate the write buffer.
 
     if (fd < 0 || fd >= N_FILE_DESCRIPTORS) {
-        log_printf("Testpoint1 \n");
         return E_BADF;
     }
 
     if (sz == 0) {
-        log_printf("Testpoint2 \n");
-
         return 0;
     }
 
     vmiter it(this, addr);
     if (!it.range_perm(sz, PTE_P | PTE_U)) {
-                log_printf("Testpoint3\n");
-
         return E_FAULT;
     }
 
@@ -1242,23 +1240,9 @@ uintptr_t proc::syscall_write(regstate* regs) {
 
     // No need to keep holding fd_table_guard because the file will not get deleted while you're reading it (ref count will never be 0)
     if (!file) {
-        log_printf("Testpoint4\n");
-
         return E_BADF;
     }
-    log_printf("about to write!\n");
     return file->vfs_write(reinterpret_cast<char*>(addr), sz);
-
-    // auto& csl = consolestate::get();
-    // spinlock_guard guard(csl.lock_);
-    // size_t n = 0;
-    // while (n < sz) {
-    //     int ch = *reinterpret_cast<const char*>(addr);
-    //     ++addr;
-    //     ++n;
-    //     console_printf(0x0F00, "%c", ch);
-    // }
-    // return n;
 }
 
 uintptr_t proc::syscall_readdiskfile(regstate* regs) {
