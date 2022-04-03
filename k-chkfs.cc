@@ -23,6 +23,8 @@ bcentry* bufcache::get_disk_entry(chkfs::blocknum_t bn,
     assert(chkfs::blocksize == PAGESIZE);
     auto irqs = lock_.lock();
 
+    // log_printf("looking for %zu\n", bn);
+
     // look for slot containing `bn`
     size_t i, empty_slot = -1;
     for (i = 0; i != ne; ++i) {
@@ -38,10 +40,13 @@ bcentry* bufcache::get_disk_entry(chkfs::blocknum_t bn,
     // if not found, use free slot
     if (i == ne) {
         if (empty_slot == size_t(-1)) {
-            // cache full!
-            lock_.unlock(irqs);
-            log_printf("bufcache: no room for block %u\n", bn);
-            return nullptr;
+            empty_slot = maybe_evict(irqs);
+            if (empty_slot == size_t(-1)) {
+                // cache full!
+                lock_.unlock(irqs);
+                log_printf("bufcache: no room for block %u\n", bn);
+                return nullptr;
+            }
         }
         i = empty_slot;
     }
@@ -53,13 +58,15 @@ bcentry* bufcache::get_disk_entry(chkfs::blocknum_t bn,
     if (e_[i].empty()) {
         e_[i].estate_ = bcentry::es_allocated;
         e_[i].bn_ = bn;
-    }
-
-    // no longer need cache lock
-    lock_.unlock_noirq();
+    } 
 
     // mark reference
     ++e_[i].ref_;
+
+    mark_recent_access(irqs, &e_[i]);
+
+    // no longer need cache lock
+    lock_.unlock_noirq();
 
     // load block
     bool ok = e_[i].load(irqs, cleaner);
@@ -69,7 +76,27 @@ bcentry* bufcache::get_disk_entry(chkfs::blocknum_t bn,
         --e_[i].ref_;
     }
     e_[i].lock_.unlock(irqs);
+
+    if (!ok) {
+        spinlock_guard guard(lock_);
+        eviction_queue_.push_front(&e_[i]);
+    }
     return ok ? &e_[i] : nullptr;
+}
+
+void bufcache::mark_recent_access(irqstate& irqs, bcentry* b) {
+    if (b->eviction_queue_link_.is_linked()) {
+        b->eviction_queue_link_.erase();
+    }
+}
+
+size_t bufcache::maybe_evict(irqstate& irqs) {
+    bcentry* lru_bcentry = eviction_queue_.pop_back();
+    if (!lru_bcentry) {
+        return -1;
+    }
+    lru_bcentry->clear();
+    return lru_bcentry->index();
 }
 
 
@@ -120,10 +147,14 @@ bool bcentry::load(irqstate& irqs, bcentry_clean_function cleaner) {
 //    not use the entry after this call.
 
 void bcentry::put() {
+    bufcache* bc = &bufcache::get();
+    spinlock_guard eviction_queue_guard(bc->lock_);
     spinlock_guard guard(lock_);
     assert(ref_ != 0);
     if (--ref_ == 0) {
-        clear();
+        // Add to LRU queue instead of clearing
+        bc->eviction_queue_.push_front(this);
+        // clear();
     }
 }
 

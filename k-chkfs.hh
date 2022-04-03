@@ -23,6 +23,7 @@ struct bcentry {
     unsigned ref_ = 0;                   // reference count
     unsigned char* buf_ = nullptr;       // memory buffer used for entry
 
+    list_links eviction_queue_link_;
 
     // return the index of this entry in the buffer cache
     inline size_t index() const;
@@ -49,18 +50,23 @@ struct bcentry {
 struct bufcache {
     using blocknum_t = bcentry::blocknum_t;
 
-    static constexpr size_t ne = 10;
+    static constexpr size_t ne = 50;
 
     spinlock lock_;                  // protects all entries' bn_ and ref_
     wait_queue read_wq_;
     bcentry e_[ne];
 
+    list<bcentry, &bcentry::eviction_queue_link_> eviction_queue_;
 
     static inline bufcache& get();
 
     bcentry* get_disk_entry(blocknum_t bn,
                             bcentry_clean_function cleaner = nullptr);
 
+    size_t maybe_evict(irqstate& irqs);
+
+    void mark_recent_access(irqstate& irqs, bcentry* b);
+    
     int sync(int drop);
 
  private:
