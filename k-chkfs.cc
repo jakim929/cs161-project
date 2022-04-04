@@ -60,13 +60,23 @@ bcentry* bufcache::get_disk_entry(chkfs::blocknum_t bn,
         e_[i].bn_ = bn;
     } 
 
+    // no longer need cache lock
+    lock_.unlock_noirq();
+
     // mark reference
     ++e_[i].ref_;
 
-    mark_recent_access(irqs, &e_[i]);
-
-    // no longer need cache lock
-    lock_.unlock_noirq();
+    {
+        spinlock_guard eviction_queue_guard(eviction_queue_lock_);
+        spinlock_guard dirty_queue_guard(dirty_queue_lock_);
+        if (e_[i].estate_ == bcentry::es_dirty) {
+            assert(!e_[i].eviction_queue_link_.is_linked());
+            assert(e_[i].dirty_queue_link_.is_linked());
+        }
+        if (e_[i].eviction_queue_link_.is_linked()) {
+            e_[i].eviction_queue_link_.erase();
+        }
+    }
 
     // load block
     bool ok = e_[i].load(irqs, cleaner);
@@ -84,18 +94,23 @@ bcentry* bufcache::get_disk_entry(chkfs::blocknum_t bn,
     return ok ? &e_[i] : nullptr;
 }
 
-void bufcache::mark_recent_access(irqstate& irqs, bcentry* b) {
-    if (b->eviction_queue_link_.is_linked()) {
-        b->eviction_queue_link_.erase();
-    }
-}
-
 size_t bufcache::maybe_evict(irqstate& irqs) {
-    bcentry* lru_bcentry = eviction_queue_.pop_back();
+    bcentry* lru_bcentry = nullptr;
+    {
+        spinlock_guard eviction_queue_guard(eviction_queue_lock_);
+        lru_bcentry = eviction_queue_.pop_back();
+    }
+
     if (!lru_bcentry) {
         return -1;
     }
-    lru_bcentry->clear();
+    assert(lru_bcentry->estate_ != bcentry::es_dirty);
+
+    {
+        spinlock_guard bcentry_guard(lru_bcentry->lock_);
+        assert(lru_bcentry->estate_ != bcentry::es_dirty);
+        lru_bcentry->clear();
+    }
     return lru_bcentry->index();
 }
 
@@ -126,6 +141,7 @@ bool bcentry::load(irqstate& irqs, bcentry_clean_function cleaner) {
                             bn_ * chkfs::blocksize);
 
             irqs = lock_.lock();
+            log_printf("setting to clean %p\n", this);
             estate_ = es_clean;
             if (cleaner) {
                 cleaner(this);
@@ -148,13 +164,20 @@ bool bcentry::load(irqstate& irqs, bcentry_clean_function cleaner) {
 
 void bcentry::put() {
     bufcache* bc = &bufcache::get();
-    spinlock_guard eviction_queue_guard(bc->lock_);
     spinlock_guard guard(lock_);
     assert(ref_ != 0);
+    assert(!eviction_queue_link_.is_linked());
     if (--ref_ == 0) {
+        assert(!eviction_queue_link_.is_linked());
+        spinlock_guard eviction_queue_guard(bc->eviction_queue_lock_);
         // Add to LRU queue instead of clearing
-        bc->eviction_queue_.push_front(this);
-        // clear();
+        if (estate_ != es_dirty) {
+            log_printf("dirty_queue_link %p %d\n", this, dirty_queue_link_.is_linked());
+            assert(!dirty_queue_link_.is_linked());
+            bc->eviction_queue_.push_front(this);
+        } else {
+            assert(dirty_queue_link_.is_linked());
+        }
     }
 }
 
@@ -163,17 +186,38 @@ void bcentry::put() {
 //    Obtains a write reference for this entry.
 
 void bcentry::get_write() {
-    // Your code here
-    assert(false);
-}
+    spinlock_guard guard(lock_);
 
+    waiter().block_until(write_reference_wq_, [&] () {
+        return write_reference_ == 0;
+    }, guard);
+
+    assert(write_reference_ == 0);
+    write_reference_ = 1;
+    
+    bufcache* bc = &bufcache::get();
+    spinlock_guard dirty_queue_guard(bc->dirty_queue_lock_);
+
+    bool was_previously_dirty = estate_ == es_dirty;
+    estate_ = es_dirty;
+
+    assert(!(this->ref_ > 0 && this->eviction_queue_link_.is_linked()));
+
+    if (was_previously_dirty) {
+        log_printf("%p was previously dirty so not updating dirty_queue\n", this);
+    } else if (!was_previously_dirty && !this->dirty_queue_link_.is_linked()) {
+        log_printf("adding %p to dirty_queue\n", this);
+        bc->dirty_queue_.push_back(this);
+    }
+}
 
 // bcentry::put_write()
 //    Releases a write reference for this entry.
 
 void bcentry::put_write() {
-    // Your code here
-    assert(false);
+    spinlock_guard guard(lock_);
+    assert(write_reference_ == 1);
+    write_reference_ = 0;
 }
 
 
@@ -186,6 +230,19 @@ void bcentry::put_write() {
 int bufcache::sync(int drop) {
     // write dirty buffers to disk
     // Your code here!
+    list<bcentry, &bcentry::dirty_queue_link_> temp_dirty_queue_;
+    {
+        spinlock_guard dirty_queue_guard(dirty_queue_lock_);
+        temp_dirty_queue_.swap(dirty_queue_);
+    }
+    while (bcentry* e = temp_dirty_queue_.pop_front()) {
+        e->get_write();
+        assert(!e->dirty_queue_link_.is_linked());
+        assert(!e->eviction_queue_link_.is_linked());
+        sata_disk->write(e->buf_, chkfs::blocksize, chkfs::blocksize * e->bn_);
+        e->estate_ = bcentry::es_clean;
+        e->put_write();
+    }
 
     // drop clean buffers if requested
     if (drop > 0) {
@@ -459,7 +516,28 @@ ssize_t inode_vnode::read(char* buf, size_t sz, size_t offset) {
 }
 
 ssize_t inode_vnode::write(char* buf, size_t sz, size_t offset) {
-    
+    inode_->lock_write();
+
+    chkfs_fileiter it(inode_);
+
+    size_t written_bytes = 0;
+    while (written_bytes < sz && offset + written_bytes < inode_->size) {
+        bcentry* b = it.find(offset + written_bytes).get_disk_entry();
+        if (!b) {
+            inode_->unlock_write();
+            return -1;
+        }
+        b->get_write();
+        size_t block_offset = it.block_relative_offset();
+        size_t to_write = min(inode_->size - written_bytes - offset, sz - written_bytes, size_t(chkfs::blocksize - block_offset));
+        memcpy(b->buf_ + block_offset, buf + written_bytes, to_write);
+        written_bytes += to_write;
+        b->put_write();
+        b->put();
+    }
+
+    inode_->unlock_write();
+    return written_bytes;
 }
 
 void inode_vnode::close() {

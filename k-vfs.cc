@@ -140,10 +140,8 @@ pipe::pipe() {
 }
 
 ssize_t pipe::read(char* buf, size_t sz) {
-    log_printf("pipe read %d\n", current()->id_);
     spinlock_guard guard(lock_);
     waiter().block_until(wq_, [&] () {
-        log_printf("%d/ WRITE_OPEN: %d\n", blen_, write_open_);
         return blen_ > 0 || !write_open_;
     }, guard);
 
@@ -182,8 +180,6 @@ ssize_t pipe::write(char* buf, size_t sz) {
 
 void pipe::close_read() {
     spinlock_guard guard(lock_);
-        log_printf("[proc %d] close_read\n", current()->id_);
-
     read_open_ = false;
     wq_.wake_all();
     return;
@@ -191,7 +187,6 @@ void pipe::close_read() {
 
 void pipe::close_write() {
     spinlock_guard guard(lock_);
-    log_printf("[proc %d] close_write\n", current()->id_);
     write_open_ = false;
     wq_.wake_all();
     return;

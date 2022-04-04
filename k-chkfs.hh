@@ -13,7 +13,7 @@ struct bcentry {
     using blocknum_t = chkfs::blocknum_t;
 
     enum estate_t {
-        es_empty, es_allocated, es_loading, es_clean
+        es_empty, es_allocated, es_loading, es_clean, es_dirty
     };
 
     std::atomic<int> estate_ = es_empty;
@@ -24,6 +24,10 @@ struct bcentry {
     unsigned char* buf_ = nullptr;       // memory buffer used for entry
 
     list_links eviction_queue_link_;
+    list_links dirty_queue_link_;
+
+    wait_queue write_reference_wq_;
+    std::atomic<int> write_reference_ = 0;
 
     // return the index of this entry in the buffer cache
     inline size_t index() const;
@@ -57,6 +61,9 @@ struct bufcache {
     bcentry e_[ne];
 
     list<bcentry, &bcentry::eviction_queue_link_> eviction_queue_;
+    spinlock eviction_queue_lock_;
+    list<bcentry, &bcentry::dirty_queue_link_> dirty_queue_;
+    spinlock dirty_queue_lock_;
 
     static inline bufcache& get();
 
@@ -64,8 +71,6 @@ struct bufcache {
                             bcentry_clean_function cleaner = nullptr);
 
     size_t maybe_evict(irqstate& irqs);
-
-    void mark_recent_access(irqstate& irqs, bcentry* b);
     
     int sync(int drop);
 
