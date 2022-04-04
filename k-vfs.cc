@@ -8,7 +8,6 @@
 file* open_file_table[N_GLOBAL_OPEN_FILES];
 spinlock open_file_table_lock;
 
-
 file::file(vnode* node, int perm)
     : vnode_(node), perm_(perm) {
     offset_ = 0;

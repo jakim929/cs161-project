@@ -674,9 +674,14 @@ int proc::syscall_open(regstate* regs) {
 
     fd = assign_to_open_fd(f);
     if (fd < 0) {
-        return E_NFILE;
+        errno = E_NFILE;
         goto open_fail_free_open_file_table_slot;
     }
+
+    if ((flag & OF_TRUNC) && (flag & OF_WRITE)) {
+        ((inode_vnode*) v)->truncate();
+    }
+
     return fd;
 
     open_fail_free_fd_table_slot: {

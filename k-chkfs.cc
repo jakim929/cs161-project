@@ -540,6 +540,17 @@ ssize_t inode_vnode::write(char* buf, size_t sz, size_t offset) {
     return written_bytes;
 }
 
+void inode_vnode::truncate() {
+    inode_->lock_write();
+    inode_->size = 0;
+    bcentry* b = inode_->entry();
+    // marks block as dirty
+    b->get_write();
+    b->put_write();
+    
+    inode_->unlock_write();
+}
+
 void inode_vnode::close() {
     inode_->put();
 }
