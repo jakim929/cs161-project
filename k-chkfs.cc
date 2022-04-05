@@ -565,10 +565,8 @@ ssize_t inode_vnode::write(char* buf, size_t sz, size_t offset) {
     chkfs_fileiter it(inode_);
 
     size_t written_bytes = 0;
-
     while (written_bytes < sz) {
-        bcentry* b = it.find(offset + written_bytes).get_disk_entry();
-        if (!b) {
+        if (it.find(offset + written_bytes).empty()) {
             size_t blocks_needed = round_up(sz - written_bytes, chkfs::blocksize) / chkfs::blocksize;
             auto& chkfs = chkfsstate::get();
             chkfs::blocknum_t bn = chkfs.allocate_extent(blocks_needed);
@@ -577,7 +575,10 @@ ssize_t inode_vnode::write(char* buf, size_t sz, size_t offset) {
             }
             int res = it.find(offset + written_bytes).insert(bn, blocks_needed);
             assert(res == 0);
-            b = it.find(offset + written_bytes).get_disk_entry();
+        }
+        bcentry* b = it.find(offset + written_bytes).get_disk_entry();
+        if (!b) {
+            return E_NOSPC;
         }
 
         b->get_write();
