@@ -146,6 +146,7 @@ class memfile_vnode: public vnode {
     memfile_vnode(memfile* underlying_memfile);
     ssize_t read(char* buf, size_t sz, size_t offset);
     ssize_t write(char* buf, size_t sz, size_t offset);
+    ssize_t lseek(off_t offset, uint64_t flag, size_t current_offset);
     void close();
   private:
     memfile* memfile_;

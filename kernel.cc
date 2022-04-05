@@ -301,6 +301,9 @@ uintptr_t proc::run_syscall(regstate* regs) {
     case SYSCALL_WRITE:
         return syscall_write(regs);
 
+    case SYSCALL_LSEEK:
+        return syscall_lseek(regs);
+
     case SYSCALL_READDISKFILE:
         return syscall_readdiskfile(regs);
 
@@ -1242,6 +1245,38 @@ uintptr_t proc::syscall_write(regstate* regs) {
         return E_BADF;
     }
     return file->vfs_write(reinterpret_cast<char*>(addr), sz);
+}
+
+ssize_t proc::syscall_lseek(regstate* regs) {
+    int fd = regs->reg_rdi;
+    size_t offset = regs->reg_rsi;
+    uint64_t flag = regs->reg_rdx;
+
+    if (
+        flag != LSEEK_SET &&
+        flag != LSEEK_CUR &&
+        flag != LSEEK_END &&
+        flag != LSEEK_SIZE
+    ) {
+        return E_INVAL;
+    }
+
+    if (fd < 0 || fd >= N_FILE_DESCRIPTORS) {
+        return E_BADF;
+    }
+    
+    file* file = nullptr;
+    {
+        spinlock_guard fd_table_guard(fd_table_lock_);
+        file = fd_table_[fd];
+    }
+
+    // No need to keep holding fd_table_guard because the file will not get deleted while you're reading it (ref count will never be 0)
+    if (!file) {
+        return E_BADF;
+    }
+
+    return file->vfs_lseek(offset, flag);
 }
 
 uintptr_t proc::syscall_readdiskfile(regstate* regs) {

@@ -378,6 +378,10 @@ ssize_t memfile_vnode::write(char* buf, size_t sz, size_t offset) {
     return sz;
 }
 
+ssize_t memfile_vnode::lseek(off_t offset, uint64_t flag, size_t current_offset) {
+    return E_SPIPE;
+}
+
 void memfile_vnode::close() {
 
 }

@@ -8,6 +8,7 @@ class vnode {
  public:
   virtual ssize_t read(char* buf, size_t sz, size_t offset);
   virtual ssize_t write(char* buf, size_t sz, size_t offset);
+  virtual ssize_t lseek(off_t offset, uint64_t flag, size_t current_offset);
   virtual void close();
 };
 
@@ -20,6 +21,7 @@ class file {
   file(vnode* node, int perm);
   ssize_t vfs_read(char* buf, size_t sz);
   ssize_t vfs_write(char* buf, size_t sz);
+  ssize_t vfs_lseek(size_t offset, uint64_t flag);
   void vfs_close();
  private:
   int perm_;
@@ -30,6 +32,7 @@ class kb_c_vnode: public vnode {
  public:
   ssize_t read(char* buf, size_t sz, size_t offset);
   ssize_t write(char* buf, size_t sz, size_t offset);
+  ssize_t lseek(off_t offset, uint64_t flag, size_t current_offset);
   void close();
 };
 
@@ -63,6 +66,7 @@ class pipe_vnode: public vnode {
   pipe_vnode(pipe* underlying_pipe, bool is_read);
   ssize_t read(char* buf, size_t sz, size_t offset);
   ssize_t write(char* buf, size_t sz, size_t offset);
+  ssize_t lseek(off_t offset, uint64_t flag, size_t current_offset);
   void close();
 };
 

@@ -498,6 +498,8 @@ ssize_t inode_vnode::read(char* buf, size_t sz, size_t offset) {
 
     size_t read_bytes = 0;
 
+
+    log_printf("starting read %zu\n", inode_->size);
     while (read_bytes < sz && offset + read_bytes < inode_->size) {
         bcentry* b = it.find(offset + read_bytes).get_disk_entry();
         if (!b) {
@@ -521,19 +523,28 @@ ssize_t inode_vnode::write(char* buf, size_t sz, size_t offset) {
     chkfs_fileiter it(inode_);
 
     size_t written_bytes = 0;
-    while (written_bytes < sz && offset + written_bytes < inode_->size) {
+
+    while (written_bytes < sz) {
         bcentry* b = it.find(offset + written_bytes).get_disk_entry();
         if (!b) {
+            assert(false);
             inode_->unlock_write();
             return -1;
         }
         b->get_write();
         size_t block_offset = it.block_relative_offset();
-        size_t to_write = min(inode_->size - written_bytes - offset, sz - written_bytes, size_t(chkfs::blocksize - block_offset));
+        size_t to_write = min(sz - written_bytes, size_t(chkfs::blocksize - block_offset));
         memcpy(b->buf_ + block_offset, buf + written_bytes, to_write);
         written_bytes += to_write;
         b->put_write();
         b->put();
+    }
+
+    if (offset + written_bytes > inode_->size) {
+        bcentry* b = inode_->entry();
+        b->get_write();
+        inode_->size = offset + written_bytes;
+        b->put_write();
     }
 
     inode_->unlock_write();
@@ -549,6 +560,35 @@ void inode_vnode::truncate() {
     b->put_write();
     
     inode_->unlock_write();
+}
+
+
+ssize_t inode_vnode::lseek(off_t offset, uint64_t flag, size_t current_offset) {
+    inode_->lock_read();
+    if (flag == LSEEK_SIZE) {
+        inode_->unlock_read();
+        return inode_->size;
+    }
+    ssize_t new_offset;
+    switch (flag) {
+        case LSEEK_SET:
+            new_offset = offset;
+            break;
+        case LSEEK_CUR:
+            new_offset = ((ssize_t) current_offset) + offset;
+            break;
+        case LSEEK_END:
+            new_offset = ((ssize_t) inode_->size) + offset;
+            break;
+    }
+
+    inode_->unlock_read();
+
+    if (new_offset < 0 || new_offset > inode_->size) {
+        return E_INVAL;
+    }
+
+    return new_offset;
 }
 
 void inode_vnode::close() {

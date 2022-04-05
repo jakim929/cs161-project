@@ -161,6 +161,7 @@ struct inode_vnode: public vnode {
     inode_vnode(chkfs::inode* underlying_inode);
     ssize_t read(char* buf, size_t sz, size_t offset);
     ssize_t write(char* buf, size_t sz, size_t offset);
+    ssize_t lseek(off_t offset, uint64_t flag, size_t current_offset);
     void truncate();
     void close();
   private:

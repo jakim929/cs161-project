@@ -33,7 +33,17 @@ ssize_t file::vfs_write(char* buf, size_t sz) {
     if (written > 0) {
         offset_ += written;
     }
+    log_printf("vfs_write returning %zu\n", written);
     return written;
+}
+
+ssize_t file::vfs_lseek(size_t offset, uint64_t flag) {
+    ssize_t retval = vnode_->lseek(offset, flag, offset_);
+    // No error, should update current offset
+    if (flag != LSEEK_SIZE && retval >= 0) {
+        offset_ = retval;
+    }
+    return retval;
 }
 
 void file::vfs_close() {
@@ -94,6 +104,10 @@ ssize_t kb_c_vnode::write(char* buf, size_t sz, size_t offset) {
     return n;
 }
 
+ssize_t kb_c_vnode::lseek(off_t offset, uint64_t flag, size_t current_offset) {
+    return E_SPIPE;
+}
+
 void kb_c_vnode::close() {
     // no clean up to do
     return;
@@ -116,6 +130,10 @@ ssize_t pipe_vnode::read(char* buf, size_t sz, size_t offset) {
 ssize_t pipe_vnode::write(char* buf, size_t sz, size_t offset) {
     log_printf("writing %d\n", is_read_);
     return pipe_->write(buf, sz);
+}
+
+ssize_t pipe_vnode::lseek(off_t offset, uint64_t flag, size_t current_offset) {
+    return E_SPIPE;
 }
 
 void pipe_vnode::close() {
