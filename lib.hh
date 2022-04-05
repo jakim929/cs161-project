@@ -249,6 +249,8 @@ struct bitset_view {
     // return minimum index of a 0-valued bit with index >= `i`, examining at
     // most `n` bits
     inline size_t find_lsz(size_t i = 0, size_t n = -1) const;
+
+    inline size_t find_x_contiguous_bits(size_t n) const;
 };
 
 
@@ -589,6 +591,21 @@ inline size_t bitset_view::find_lsz(size_t i, size_t n) const {
         mask = -1;
     }
     return b ? min(n, i + b - 1) : n;
+}
+inline size_t bitset_view::find_x_contiguous_bits(size_t x) const {
+    size_t i = 0;
+    size_t found = -1;
+    while (i < n_ - x) {
+        size_t lsb = find_lsb(i, n_);
+        size_t lsz = find_lsz(lsb, x);
+        if (lsz - lsb >= x) {
+            // found contiguous chunk
+            found = lsb;
+            break;
+        }
+        i = lsz + 1;
+    }
+    return found;
 }
 
 #endif /* !CHICKADEE_LIB_HH */

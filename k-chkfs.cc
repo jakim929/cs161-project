@@ -1,6 +1,7 @@
 #include "k-chkfs.hh"
 #include "k-ahci.hh"
 #include "k-chkfsiter.hh"
+#include "lib.hh"
 
 bufcache bufcache::bc;
 
@@ -23,8 +24,6 @@ bcentry* bufcache::get_disk_entry(chkfs::blocknum_t bn,
     assert(chkfs::blocksize == PAGESIZE);
     auto irqs = lock_.lock();
 
-    // log_printf("looking for %zu\n", bn);
-
     // look for slot containing `bn`
     size_t i, empty_slot = -1;
     for (i = 0; i != ne; ++i) {
@@ -44,8 +43,14 @@ bcentry* bufcache::get_disk_entry(chkfs::blocknum_t bn,
             if (empty_slot == size_t(-1)) {
                 // cache full!
                 lock_.unlock(irqs);
-                log_printf("bufcache: no room for block %u\n", bn);
-                return nullptr;
+                sync(0);
+                irqs = lock_.lock();
+                empty_slot = maybe_evict(irqs);
+                if (empty_slot == size_t(-1)) {
+                    lock_.unlock(irqs);
+                    log_printf("bufcache: no room for block %u\n", bn);
+                    return nullptr;
+                }
             }
         }
         i = empty_slot;
@@ -102,8 +107,11 @@ size_t bufcache::maybe_evict(irqstate& irqs) {
     }
 
     if (!lru_bcentry) {
+        log_printf("none to evict\n");
         return -1;
     }
+    log_printf("evicting %zu\n", lru_bcentry->bn_);
+
     assert(lru_bcentry->estate_ != bcentry::es_dirty);
 
     {
@@ -174,7 +182,9 @@ void bcentry::put() {
         if (estate_ != es_dirty) {
             log_printf("dirty_queue_link %p %d\n", this, dirty_queue_link_.is_linked());
             assert(!dirty_queue_link_.is_linked());
-            bc->eviction_queue_.push_front(this);
+            if (bn_ != 0) {
+                bc->eviction_queue_.push_front(this);
+            }
         } else {
             assert(dirty_queue_link_.is_linked());
         }
@@ -240,8 +250,12 @@ int bufcache::sync(int drop) {
         assert(!e->dirty_queue_link_.is_linked());
         assert(!e->eviction_queue_link_.is_linked());
         sata_disk->write(e->buf_, chkfs::blocksize, chkfs::blocksize * e->bn_);
-        e->estate_ = bcentry::es_clean;
         e->put_write();
+        spinlock_guard(e->lock_);
+        e->estate_ = bcentry::es_clean;
+        if (e->ref_ == 0) {
+            eviction_queue_.push_back(e);
+        }
     }
 
     // drop clean buffers if requested
@@ -259,7 +273,7 @@ int bufcache::sync(int drop) {
             }
 
             // actually drop buffer
-            if (e_[i].ref_ == 0) {
+            if (e_[i].ref_ == 0 && e_[i].bn_ != 0) {
                 e_[i].clear();
             }
         }
@@ -454,8 +468,36 @@ chkfs::inode* chkfsstate::lookup_inode(const char* filename) {
 //    `blocknum >= blocknum_t(E_MINERROR)`.
 
 auto chkfsstate::allocate_extent(unsigned count) -> blocknum_t {
-    // Your code here
-    return E_INVAL;
+    auto& bc = bufcache::get();
+    auto superblock_entry = bc.get_disk_entry(0);
+    assert(superblock_entry);
+    auto& sb = *reinterpret_cast<chkfs::superblock*>
+        (&superblock_entry->buf_[chkfs::superblock_offset]);
+    superblock_entry->put();
+
+    bcentry* fbb_b = bc.get_disk_entry(sb.fbb_bn);
+
+    fbb_b->get_write();
+    assert(fbb_b);
+
+    bitset_view fbb_bitset(reinterpret_cast<uint64_t*>(fbb_b->buf_), chkfs::bitsperblock);
+    
+    size_t contiguous_bit_start = fbb_bitset.find_x_contiguous_bits(count);
+
+    if (contiguous_bit_start == size_t(-1)) {
+        fbb_b->put_write();
+        return E_NOSPC;
+    }
+
+    log_printf("found extent for %zu starts at %zu\n", count, contiguous_bit_start);
+    for (size_t i = 0; i < count; i++) {
+        assert(fbb_bitset[contiguous_bit_start + i] == 1);
+        fbb_bitset[contiguous_bit_start + i] = 0;
+    }
+
+    fbb_b->put_write();
+    
+    return contiguous_bit_start;
 }
 
 // inode_loader functions
@@ -527,10 +569,17 @@ ssize_t inode_vnode::write(char* buf, size_t sz, size_t offset) {
     while (written_bytes < sz) {
         bcentry* b = it.find(offset + written_bytes).get_disk_entry();
         if (!b) {
-            assert(false);
-            inode_->unlock_write();
-            return -1;
+            size_t blocks_needed = round_up(sz - written_bytes, chkfs::blocksize) / chkfs::blocksize;
+            auto& chkfs = chkfsstate::get();
+            chkfs::blocknum_t bn = chkfs.allocate_extent(blocks_needed);
+            if (bn >= chkfs::blocknum_t(E_MINERROR)) {
+                return int(bn);
+            }
+            int res = it.find(offset + written_bytes).insert(bn, blocks_needed);
+            assert(res == 0);
+            b = it.find(offset + written_bytes).get_disk_entry();
         }
+
         b->get_write();
         size_t block_offset = it.block_relative_offset();
         size_t to_write = min(sz - written_bytes, size_t(chkfs::blocksize - block_offset));
@@ -569,7 +618,7 @@ ssize_t inode_vnode::lseek(off_t offset, uint64_t flag, size_t current_offset) {
         inode_->unlock_read();
         return inode_->size;
     }
-    ssize_t new_offset;
+    ssize_t new_offset = current_offset;
     switch (flag) {
         case LSEEK_SET:
             new_offset = offset;

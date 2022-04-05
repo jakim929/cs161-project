@@ -54,7 +54,7 @@ struct bcentry {
 struct bufcache {
     using blocknum_t = bcentry::blocknum_t;
 
-    static constexpr size_t ne = 50;
+    static constexpr size_t ne = 10;
 
     spinlock lock_;                  // protects all entries' bn_ and ref_
     wait_queue read_wq_;
