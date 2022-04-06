@@ -518,7 +518,9 @@ int chkfsstate::create_directory(inode* dirino, const char* filename, inum_t inu
             dirino->size += blocksize;
             dirino->entry()->put_write();
         }
-        if (bcentry* e = it.find(diroff).get_disk_entry()) {
+        bcentry* e = it.find(diroff).get_disk_entry();
+        assert(e != nullptr);
+        if (e) {
             size_t bsz = min(dirino->size - diroff, blocksize);
             auto dirent = reinterpret_cast<chkfs::dirent*>(e->buf_);
             for (unsigned i = 0; i * sizeof(*dirent) < bsz; ++i, ++dirent) {
