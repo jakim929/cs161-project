@@ -104,6 +104,11 @@ struct chkfsstate {
 
     blocknum_t allocate_extent(unsigned count = 1);
 
+    inum_t create_inode();
+
+    int create_directory(inode* dirino, const char* filename, inum_t inum);
+
+    inode* create_file(const char* filename);
 
   private:
     static chkfsstate fs;

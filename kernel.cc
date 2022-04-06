@@ -544,16 +544,15 @@ int proc::syscall_waitpid(regstate* regs) {
     int options = (int) regs->reg_rdx;
 
     return waitpid(pid, stat, options);
-
-    // assert(options == W_NOHANG);
 }
 
 int proc::close_fd(int fd, spinlock_guard& guard) {
-    // log_printf("PROCESS %d TRYING TO CLOSE %d\n", id_, fd);
     file* open_file = fd_table_[fd];
     if (!open_file) {
         return E_BADF;
     }
+
+    log_printf("CLOSING fd %d\n", fd);
 
     fd_table_[fd] = nullptr;
     {
@@ -641,10 +640,15 @@ int proc::syscall_open(regstate* regs) {
     }
 
     char* pathname = reinterpret_cast<char*>(pathname_ptr);
+    
+    // create file
+    if ((flag & OF_CREATE) && (flag & OF_WRITE)) {
+        log_printf("creating file %s \n", pathname);
+        chkfsstate::get().create_file(pathname);
+    }
 
     chkfsstate::inode* ino = nullptr;
     ino = chkfsstate::get().lookup_inode(pathname);
-
     if (!ino) {
         return E_NOENT;
     }
@@ -706,7 +710,8 @@ int proc::syscall_open(regstate* regs) {
     }
     
     open_fail_return : {
-
+        ino->put();
+        assert(ino);
     }
 
     return errno;
