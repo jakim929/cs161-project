@@ -507,6 +507,7 @@ int chkfsstate::create_directory(inode* dirino, const char* filename, inum_t inu
     bool found = false;
     chkfs_fileiter it(dirino);
     for (size_t diroff = 0; !found; diroff += blocksize) {
+        bool created_new_extent = false;
         if (it.find(diroff).empty()) {
             log_printf("creating new extent for directory for %s\n", filename);
             blocknum_t bn = fs.allocate_extent(1);
@@ -517,10 +518,9 @@ int chkfsstate::create_directory(inode* dirino, const char* filename, inum_t inu
             dirino->entry()->get_write();
             dirino->size += blocksize;
             dirino->entry()->put_write();
+            created_new_extent = true;
         }
-        bcentry* e = it.find(diroff).get_disk_entry();
-        assert(e != nullptr);
-        if (e) {
+        if (bcentry* e = it.find(diroff).get_disk_entry()) {
             size_t bsz = min(dirino->size - diroff, blocksize);
             auto dirent = reinterpret_cast<chkfs::dirent*>(e->buf_);
             for (unsigned i = 0; i * sizeof(*dirent) < bsz; ++i, ++dirent) {
@@ -535,6 +535,8 @@ int chkfsstate::create_directory(inode* dirino, const char* filename, inum_t inu
             }
             e->put();
         } else {
+            assert(created_new_extent == true);
+            assert(it.find(diroff).blocknum() == 0);
             assert(false);
             return -1;
         }
