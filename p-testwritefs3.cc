@@ -27,12 +27,18 @@ void process_main() {
     assert_lt(f, 0);
     assert_eq(f, E_NOENT);
 
+    printf("breakpoint 1\n");
+
     f = sys_open("geisel.txt", OF_WRITE | OF_CREATE);
     assert_gt(f, 2);
+
+    printf("breakpoint 2\n");
 
     n = sys_write(f, "Why, girl, you're insane!\n"
                   "Elephants don't hatch chickadee eggs!\n", 64);
     assert_eq(n, 64);
+
+    printf("breakpoint 3\n");
 
     sys_close(f);
 
