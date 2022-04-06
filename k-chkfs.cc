@@ -49,7 +49,6 @@ bcentry* bufcache::get_disk_entry(chkfs::blocknum_t bn,
                 if (empty_slot == size_t(-1)) {
                     lock_.unlock(irqs);
                     log_printf("bufcache: no room for block %u\n", bn);
-                    assert(false);
                     return nullptr;
                 }
             }
@@ -507,14 +506,13 @@ int chkfsstate::create_directory(inode* dirino, const char* filename, inum_t inu
     bool found = false;
     chkfs_fileiter it(dirino);
     for (size_t diroff = 0; !found; diroff += blocksize) {
-        bool created_new_extent = false;
         if (it.find(diroff).empty()) {
             log_printf("creating new extent for directory for %s\n", filename);
             blocknum_t bn = fs.allocate_extent(1);
             if (bn >= chkfs::blocknum_t(E_MINERROR)) {
                 return int(bn);
             }
-            int res = it.find(diroff - 1).insert(bn, 1);
+            int res = it.find(diroff).insert(bn, 1);
             dirino->entry()->get_write();
             dirino->size += blocksize;
             dirino->entry()->put_write();
@@ -535,8 +533,6 @@ int chkfsstate::create_directory(inode* dirino, const char* filename, inum_t inu
             }
             e->put();
         } else {
-            // assert(created_new_extent == true);
-            // assert(it.find(diroff).blocknum() == 0);
             assert(false);
             return -1;
         }
