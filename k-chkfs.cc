@@ -540,8 +540,6 @@ chkfs::inode* chkfsstate::create_file(const char* filename) {
     inum_t inum = create_inode();
     assert(inum > 1);
 
-    log_printf("TEST %s is in %d\n", filename,inum);
-
     auto dirino = get_inode(1);
     if (dirino) {
         dirino->lock_write();
