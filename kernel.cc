@@ -51,21 +51,14 @@ void kernel_start(const char* command) {
     cpus[0].schedule(nullptr);
 }
 
-// proc::init_process_fn
 void init_process_fn() {
     proc* p = ptable[1];
     int stat;
     while(true) {       
         int result = p->waitpid(0, &stat, 0);
         if (result < 0) {
-            {
-                spinlock_guard ptable_guard(ptable_lock);
-                spinlock_guard hierarchy_guard(process_hierarchy_lock);
-                if (ptable[2] == nullptr && p->children_list_.empty()) {
-                    hierarchy_guard.unlock();
-                    ptable_guard.unlock();
-                    process_halt();
-                }
+            if (result == E_CHILD) {
+                process_halt();
             }
             p->yield();
         }
@@ -1073,13 +1066,13 @@ int proc::syscall_fork(regstate* regs) {
         }
     }
 
-    child->init_user(pid, id_, child_pagetable);
-    child->init_fd_table();
 
     {
         spinlock_guard guard(process_hierarchy_lock);
+        child->init_user(pid, id_, child_pagetable);
         children_list_.push_back(child);
     }
+    child->init_fd_table();
 
     // copy over file descriptor table from parent
     child->copy_fd_table_from_proc(this);

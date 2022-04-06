@@ -56,7 +56,7 @@ struct __attribute__((aligned(4096))) proc {
     int resume_count_ = 0;
     int home_cpuindex_;
     wait_queue wq_;
-    bool interrupt_sleep_ = false;
+    std::atomic<bool> interrupt_sleep_ = false;
 
     file* fd_table_[N_FILE_DESCRIPTORS];
     spinlock fd_table_lock_;
