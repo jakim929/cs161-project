@@ -530,6 +530,7 @@ int chkfsstate::create_directory(inode* dirino, const char* filename, inum_t inu
             }
             e->put();
         } else {
+            assert(it.find(diroff).empty());
             assert(false);
             return -1;
         }
