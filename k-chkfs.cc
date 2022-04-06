@@ -102,7 +102,6 @@ bcentry* bufcache::get_disk_entry(chkfs::blocknum_t bn,
 }
 
 size_t bufcache::maybe_evict(irqstate& irqs) {
-    log_printf("maybe evict\n");
     bcentry* lru_bcentry = nullptr;
     {
         spinlock_guard eviction_queue_guard(eviction_queue_lock_);
@@ -110,10 +109,8 @@ size_t bufcache::maybe_evict(irqstate& irqs) {
     }
 
     if (!lru_bcentry) {
-        log_printf("none to evict\n");
         return -1;
     }
-    log_printf("evicting %zu\n", lru_bcentry->bn_);
 
     assert(lru_bcentry->estate_ != bcentry::es_dirty);
 
@@ -440,7 +437,6 @@ chkfs::inode* chkfsstate::lookup_inode(inode* dirino,
             return nullptr;
         }
     }
-    log_printf("%s is found in inode %d\n", filename, in);
     return get_inode(in);
 }
 
@@ -473,19 +469,18 @@ chkfs::inum_t chkfsstate::create_inode() {
     inum_t inum = 0;
     for (int i = 0; i < ninode_blocks; i++) {
         auto bn = sb.inode_bn + i;
+
         if (auto inode_entry = bc.get_disk_entry(bn, clean_inode_block)) {
             chkfs::inode* ino = reinterpret_cast<inode*>(inode_entry->buf_);
             for (size_t j = 0; j < chkfs::inodesperblock; j++) {
                 inum_t potential_inum = i * chkfs::inodesperblock + j;
                 if (ino[j].type == 0 && potential_inum != 0 && potential_inum != 1) {
-                    ino[j].lock_write();
                     inode_entry->get_write();
                     inum = potential_inum;
                     ino[j].type = chkfs::type_regular;
                     ino[j].nlink = 1;
                     ino[j].size = 0;
                     inode_entry->put_write();
-                    ino[j].unlock_write();
                     break;
                 }
             }
@@ -499,6 +494,8 @@ chkfs::inum_t chkfsstate::create_inode() {
             return 0;
         }
     }
+
+    assert(inum > 0);
     return inum;
 }
 
@@ -513,19 +510,18 @@ int chkfsstate::create_directory(inode* dirino, const char* filename, inum_t inu
                 return int(bn);
             }
             int res = it.find(diroff).insert(bn, 1);
-            dirino->entry()->get_write();
+            it.inode()->entry()->get_write();
             dirino->size += blocksize;
-            dirino->entry()->put_write();
-            created_new_extent = true;
+            it.inode()->entry()->put_write();
         }
         if (bcentry* e = it.find(diroff).get_disk_entry()) {
             size_t bsz = min(dirino->size - diroff, blocksize);
             auto dirent = reinterpret_cast<chkfs::dirent*>(e->buf_);
             for (unsigned i = 0; i * sizeof(*dirent) < bsz; ++i, ++dirent) {
-                if (!dirent->inum) {
+                if (dirent->inum == 0) {
                     e->get_write();
                     dirent->inum = inum;
-                    memcpy(dirent->name, filename, strlen(filename));
+                    memcpy(&dirent->name, filename, strlen(filename) + 1);
                     found = true;
                     e->put_write();
                     break;
@@ -534,19 +530,21 @@ int chkfsstate::create_directory(inode* dirino, const char* filename, inum_t inu
             e->put();
         } else {
             assert(false);
+            log_printf("failing\n");
             return -1;
         }
     }
+    return 1;
 }
 
 chkfs::inode* chkfsstate::create_file(const char* filename) {
     inum_t inum = create_inode();
-    assert(inum > 1);
+    // assert(inum > 1);
 
     auto dirino = get_inode(1);
     if (dirino) {
         dirino->lock_write();
-        auto ino = fs.create_directory(dirino, filename, inum);
+        int result = fs.create_directory(dirino, filename, inum);
         dirino->unlock_write();
         dirino->put();
         return get_inode(inum);
