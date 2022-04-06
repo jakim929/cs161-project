@@ -49,6 +49,7 @@ bcentry* bufcache::get_disk_entry(chkfs::blocknum_t bn,
                 if (empty_slot == size_t(-1)) {
                     lock_.unlock(irqs);
                     log_printf("bufcache: no room for block %u\n", bn);
+                    assert(false);
                     return nullptr;
                 }
             }
@@ -85,6 +86,8 @@ bcentry* bufcache::get_disk_entry(chkfs::blocknum_t bn,
 
     // load block
     bool ok = e_[i].load(irqs, cleaner);
+
+    assert(ok);
 
     // unlock and return entry
     if (!ok) {
@@ -530,7 +533,6 @@ int chkfsstate::create_directory(inode* dirino, const char* filename, inum_t inu
             }
             e->put();
         } else {
-            assert(it.find(diroff).empty());
             assert(false);
             return -1;
         }
