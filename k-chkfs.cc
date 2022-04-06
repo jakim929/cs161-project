@@ -514,7 +514,7 @@ int chkfsstate::create_directory(inode* dirino, const char* filename, inum_t inu
             if (bn >= chkfs::blocknum_t(E_MINERROR)) {
                 return int(bn);
             }
-            int res = it.find(diroff).insert(bn, 1);
+            int res = it.find(diroff - 1).insert(bn, 1);
             dirino->entry()->get_write();
             dirino->size += blocksize;
             dirino->entry()->put_write();
@@ -535,8 +535,8 @@ int chkfsstate::create_directory(inode* dirino, const char* filename, inum_t inu
             }
             e->put();
         } else {
-            assert(created_new_extent == true);
-            assert(it.find(diroff).blocknum() == 0);
+            // assert(created_new_extent == true);
+            // assert(it.find(diroff).blocknum() == 0);
             assert(false);
             return -1;
         }
