@@ -118,6 +118,7 @@ struct chkfsstate {
     int is_directory_empty(inode* dirino);
 
     blocknum_t allocate_extent(unsigned count = 1);
+    int deallocate_extent(blocknum_t bn, unsigned count);
 
     inum_t create_inode(int inode_type);
 

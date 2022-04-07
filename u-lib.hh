@@ -203,7 +203,7 @@ inline int sys_mkdir(const char* path, int flags) {
 
 inline int sys_rmdir(const char* path, int flags) {
     access_memory(path);
-    return make_syscall(SYSCALL_MKDIR, reinterpret_cast<uintptr_t>(path),
+    return make_syscall(SYSCALL_RMDIR, reinterpret_cast<uintptr_t>(path),
                         flags);
 }
 

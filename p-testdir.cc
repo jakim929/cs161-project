@@ -21,6 +21,28 @@ void process_main() {
     ret = sys_mkdir("testfolder/james/innerfolder", 0);
     assert_eq(ret, 0);
 
+    // shouldn't be able to delete folders with files/directories inside
+    ret = sys_rmdir("testfolder", 0);
+    assert_lt(ret, 0);
+
+    ret = sys_rmdir("testfolder/james", 0);
+    assert_lt(ret, 0);
+
+    // can remove folders that have no files/directories inside
+    ret = sys_rmdir("testfolder/james/innerfolder", 0);
+    assert_eq(ret, 0);
+
+    ret = sys_rmdir("testfolder/james", 0);
+    assert_eq(ret, 0);
+
+    ret = sys_mkdir("testfolder/james", 0);
+    assert_eq(ret, 0);
+
+    ret = sys_mkdir("testfolder/james/innerfolder", 0);
+    assert_eq(ret, 0);
+
+    
+
     f = sys_open("testfolder/james/innerfolder/geisel.txt", OF_WRITE | OF_CREATE);
     assert_gt(f, 2);
 

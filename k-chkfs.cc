@@ -389,7 +389,6 @@ chkfs::inode* chkfsstate::get_inode(inum_t inum) {
     return ino;
 }
 
-
 namespace chkfs {
 // chkfs::inode::entry()
 //    Returns a pointer to the buffer cache entry containing this inode.
@@ -574,11 +573,9 @@ chkfs::inum_t chkfsstate::create_inode(int inode_type) {
 }
 
 int chkfsstate::create_dirent(inode* dirino, const char* filename, inum_t inum) {
-    bool found = false;
     chkfs_fileiter it(dirino);
-    for (size_t diroff = 0; !found; diroff += blocksize) {
+    for (size_t diroff = 0; ; diroff += blocksize) {
         if (it.find(diroff).empty()) {
-            log_printf("creating new extent for directory for %s\n", filename);
             blocknum_t bn = fs.allocate_extent(1);
             if (bn >= chkfs::blocknum_t(E_MINERROR)) {
                 return int(bn);
@@ -596,9 +593,9 @@ int chkfsstate::create_dirent(inode* dirino, const char* filename, inum_t inum) 
                     e->get_write();
                     dirent->inum = inum;
                     memcpy(&dirent->name, filename, strlen(filename) + 1);
-                    found = true;
                     e->put_write();
-                    break;
+                    e->put();
+                    return 1;
                 }
             }
             e->put();
@@ -612,8 +609,61 @@ int chkfsstate::create_dirent(inode* dirino, const char* filename, inum_t inum) 
 }
 
 int chkfsstate::remove_dirent(inode* dirino, const char* filename, inum_t inum) {
-    
+    chkfs_fileiter it(dirino);
+    for (size_t diroff = 0; ; diroff += blocksize) {
+        if (!it.find(diroff).empty()) {
+            bcentry* e = it.find(diroff).get_disk_entry();
+            if (!e) {
+                return E_NOSPC;
+            }
+            size_t bsz = min(dirino->size - diroff, blocksize);
+            auto dirent = reinterpret_cast<chkfs::dirent*>(e->buf_);
+            e->get_write();
+            for (unsigned i = 0; i * sizeof(*dirent) < bsz; ++i, ++dirent) {
+                
+                if (dirent->inum == inum && strcmp(dirent->name, filename) == 0) {
+                    log_printf("removing dirent for %s\n", dirent->name);
+                    dirent->inum = 0;
+                    dirent->name[0] = '\0';
+                    e->put_write();
+                    e->put();
+                    return 1;
+                }
+            }
+            e->put_write();
+            e->put();
+        } else {
+            break;
+        }
+    }
+    return 0;
+
+
+    // chkfs_fileiter it(dirino);
+    // bool removed = false;
+    // for (size_t diroff = 0;; diroff += blocksize) {
+    //     if (bcentry* e = it.find(diroff).get_disk_entry()) {
+    //         size_t bsz = min(dirino->size - diroff, blocksize);
+    //         auto dirent = reinterpret_cast<chkfs::dirent*>(e->buf_);
+    //         e->get_write();
+    //         for (unsigned i = 0; i * sizeof(*dirent) < bsz; ++i, ++dirent) {
+    //             if (dirent->inum == inum && strcmp(dirent->name, filename) == 0) {
+    //                 dirent->inum = 0;
+    //                 dirent->name[0] = '\0';
+    //                 e->put_write();
+    //                 e->put();
+    //                 return 1;
+    //             }
+    //         }
+    //         e->put_write();
+    //         e->put();
+    //     } else {
+    //         return E_NOSPC;
+    //     }
+    // }
+    // return 0;
 }
+
 
 chkfs::inode* chkfsstate::create_file_in_root_directory(const char* filename) {
     inum_t inum = create_inode(chkfs::type_regular);
@@ -640,26 +690,26 @@ chkfs::inode* chkfsstate::create_file_in_directory(chkfs::inode* dirino, const c
 
 int chkfsstate::is_directory_empty(chkfs::inode* dirino) {
     chkfs_fileiter it(dirino);
-    bool is_empty = true;
-    for (size_t diroff = 0; !is_empty; diroff += blocksize) {
-        if (bcentry* e = it.find(diroff).get_disk_entry()) {
+    for (size_t diroff = 0; ; diroff += blocksize) {
+        if (!it.find(diroff).empty()) {
+            bcentry* e = it.find(diroff).get_disk_entry();
+            if (!e) {
+                return E_NOSPC;
+            }
             size_t bsz = min(dirino->size - diroff, blocksize);
             auto dirent = reinterpret_cast<chkfs::dirent*>(e->buf_);
             for (unsigned i = 0; i * sizeof(*dirent) < bsz; ++i, ++dirent) {
                 if (dirent->inum != 0) {
-                    is_empty == true;
-                    break;
+                    e->put();
+                    return 0;
                 }
             }
             e->put();
         } else {
-            return E_NOSPC;
+            break;
         }
     }
-    if (is_empty) {
-        return 1;
-    }
-    return 0;
+    return 1;
 }
 
 // chkfsstate::allocate_extent(unsigned count)
@@ -681,7 +731,6 @@ auto chkfsstate::allocate_extent(unsigned count) -> blocknum_t {
     bcentry* fbb_b = bc.get_disk_entry(sb.fbb_bn);
 
     fbb_b->get_write();
-    assert(fbb_b);
 
     bitset_view fbb_bitset(reinterpret_cast<uint64_t*>(fbb_b->buf_), chkfs::bitsperblock);
     
@@ -692,7 +741,6 @@ auto chkfsstate::allocate_extent(unsigned count) -> blocknum_t {
         return E_NOSPC;
     }
 
-    log_printf("found extent for %zu starts at %zu\n", count, contiguous_bit_start);
     for (size_t i = 0; i < count; i++) {
         assert(fbb_bitset[contiguous_bit_start + i] == 1);
         fbb_bitset[contiguous_bit_start + i] = 0;
@@ -701,6 +749,31 @@ auto chkfsstate::allocate_extent(unsigned count) -> blocknum_t {
     fbb_b->put_write();
     
     return contiguous_bit_start;
+}
+
+int chkfsstate::deallocate_extent(blocknum_t bn, unsigned count) {
+        auto& bc = bufcache::get();
+    auto superblock_entry = bc.get_disk_entry(0);
+    assert(superblock_entry);
+    auto& sb = *reinterpret_cast<chkfs::superblock*>
+        (&superblock_entry->buf_[chkfs::superblock_offset]);
+    superblock_entry->put();
+
+    bcentry* fbb_b = bc.get_disk_entry(sb.fbb_bn);
+    if (!fbb_b) {
+        return E_NOSPC;
+    }
+    
+    fbb_b->get_write();
+
+    bitset_view fbb_bitset(reinterpret_cast<uint64_t*>(fbb_b->buf_), chkfs::bitsperblock);
+    for (size_t i = bn; i < bn + count; i++) {
+        assert(fbb_bitset[i] == 0);
+        fbb_bitset[i] = 1;
+    }
+
+    fbb_b->put_write();
+    return 0;
 }
 
 // inode_loader functions

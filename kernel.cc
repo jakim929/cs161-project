@@ -785,6 +785,8 @@ int proc::syscall_mkdir(regstate* regs) {
     }
 
     const char* pathname = reinterpret_cast<const char*>(pathname_ptr);
+    log_printf("mkrdir %s\n", pathname);
+
 
     path_elements path(pathname);
     chkfs::inode* dirino =  chkfsstate::get().lookup_containing_directory_inode(pathname);
@@ -804,6 +806,11 @@ int proc::syscall_mkdir(regstate* regs) {
     chkfs::inum_t directory_inum = chkfsstate::get().create_inode(chkfs::type_directory);
     dirino->lock_write();
     chkfsstate::get().create_dirent(dirino, path.last(), directory_inum);
+
+    // sanity check: directory shouldn't be empty
+    int test = chkfsstate::get().is_directory_empty(dirino);
+    assert(test == 0);
+
     dirino->unlock_write();
     dirino->put();
     return 0;
@@ -816,7 +823,12 @@ int proc::syscall_rmdir(regstate* regs) {
         return E_FAULT;
     }
 
+
     const char* pathname = reinterpret_cast<const char*>(pathname_ptr);
+    path_elements path(pathname);
+
+    log_printf("rmdir %s\n", pathname);
+
 
     chkfs::inode* dirino = chkfsstate::get().lookup_directory_inode(pathname);
     if (!dirino) {
@@ -838,9 +850,48 @@ int proc::syscall_rmdir(regstate* regs) {
         return E_INVAL;
     }
 
+    // Deallocate extents for the directory inode
+    chkfs_fileiter it(dirino);
+    dirino->lock_write();
 
-    // 4/7 TODO remove inode and such
-    
+    // TODO: switch to just iterating over extents so it's faster
+    for (size_t diroff = 0; !it.find(diroff).empty(); diroff += chkfs::blocksize) {
+        chkfsstate::get().deallocate_extent(it.find(diroff).blocknum(), 1);
+    }
+
+    // Free up inode from inode block
+    dirino->entry()->get_write();
+    dirino->type = 0;
+    dirino->size = 0;
+    dirino->nlink = 0;
+    for (int i = 0; i < chkfs::ndirect; i++) {
+        dirino->direct[i].first = 0;
+        dirino->direct[i].count = 0;
+    }
+    dirino->indirect.first = 0;
+    dirino->indirect.count = 0;
+    dirino->entry()->put_write();
+    dirino->unlock_write();
+
+    auto& bc = bufcache::get();
+    auto superblock_entry = bc.get_disk_entry(0);
+    assert(superblock_entry);
+    auto& sb = *reinterpret_cast<chkfs::superblock*>
+        (&superblock_entry->buf_[chkfs::superblock_offset]);
+    superblock_entry->put();
+
+    chkfs::inum_t inum = (dirino->entry()->bn_ - sb.inode_bn) * chkfs::inodesperblock + ((uintptr_t) dirino - (uintptr_t) dirino->entry()->buf_) / sizeof(chkfs::inode);
+    dirino->put();
+
+    chkfs::inode* containing_dirino = chkfsstate::get().lookup_containing_directory_inode(pathname);
+    // Free up from dirent
+
+    containing_dirino->lock_write();
+    int remove_dirent_result = chkfsstate::get().remove_dirent(containing_dirino, path.last(), inum);
+    assert(remove_dirent_result == 1);
+    containing_dirino->unlock_write();
+
+    containing_dirino->put();
 
     return 0;
 }
