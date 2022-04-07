@@ -818,13 +818,28 @@ int proc::syscall_rmdir(regstate* regs) {
 
     const char* pathname = reinterpret_cast<const char*>(pathname_ptr);
 
-    chkfs::inode* directory_inode = chkfsstate::get().lookup_directory_inode(pathname);
-
-    if (!directory_inode) {
+    chkfs::inode* dirino = chkfsstate::get().lookup_directory_inode(pathname);
+    if (!dirino) {
         return E_NOENT;
     }
 
     // Check if directory is empty
+
+    dirino->lock_read();
+    int result = chkfsstate::get().is_directory_empty(dirino);
+    dirino->unlock_read();
+
+    // Error code
+    if (result < 0) {
+        dirino->put();
+        return result;
+    } else if (result == 0) {
+        dirino->put();
+        return E_INVAL;
+    }
+
+
+    // 4/7 TODO remove inode and such
     
 
     return 0;

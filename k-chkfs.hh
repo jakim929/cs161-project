@@ -115,11 +115,14 @@ struct chkfsstate {
 
     inode* lookup_relative_inode_for_type(inode* dirino, const char* directory_name, int inode_type);
 
+    int is_directory_empty(inode* dirino);
+
     blocknum_t allocate_extent(unsigned count = 1);
 
     inum_t create_inode(int inode_type);
 
     int create_dirent(inode* dirino, const char* filename, inum_t inum);
+    int remove_dirent(inode* dirino, const char* filename, inum_t inum);
 
     inode* create_file_in_root_directory(const char* filename);
 

@@ -611,6 +611,10 @@ int chkfsstate::create_dirent(inode* dirino, const char* filename, inum_t inum) 
     return 1;
 }
 
+int chkfsstate::remove_dirent(inode* dirino, const char* filename, inum_t inum) {
+    
+}
+
 chkfs::inode* chkfsstate::create_file_in_root_directory(const char* filename) {
     inum_t inum = create_inode(chkfs::type_regular);
 
@@ -632,6 +636,30 @@ chkfs::inode* chkfsstate::create_file_in_directory(chkfs::inode* dirino, const c
     int result = fs.create_dirent(dirino, filename, inum);
 
     return get_inode(inum);
+}
+
+int chkfsstate::is_directory_empty(chkfs::inode* dirino) {
+    chkfs_fileiter it(dirino);
+    bool is_empty = true;
+    for (size_t diroff = 0; !is_empty; diroff += blocksize) {
+        if (bcentry* e = it.find(diroff).get_disk_entry()) {
+            size_t bsz = min(dirino->size - diroff, blocksize);
+            auto dirent = reinterpret_cast<chkfs::dirent*>(e->buf_);
+            for (unsigned i = 0; i * sizeof(*dirent) < bsz; ++i, ++dirent) {
+                if (dirent->inum != 0) {
+                    is_empty == true;
+                    break;
+                }
+            }
+            e->put();
+        } else {
+            return E_NOSPC;
+        }
+    }
+    if (is_empty) {
+        return 1;
+    }
+    return 0;
 }
 
 // chkfsstate::allocate_extent(unsigned count)
