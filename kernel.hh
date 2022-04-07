@@ -110,6 +110,9 @@ struct __attribute__((aligned(4096))) proc {
     int syscall_close(regstate* reg);
     uint64_t syscall_pipe(regstate* reg);
 
+    int syscall_mkdir(regstate* reg);
+    int syscall_rmdir(regstate* reg);
+
     int get_open_fd(spinlock_guard& guard);
     int assign_to_open_fd(file* f);
     int assign_to_open_fd(file* f, spinlock_guard& guard);

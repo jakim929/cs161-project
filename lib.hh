@@ -253,6 +253,32 @@ struct bitset_view {
     inline size_t find_x_contiguous_bits(size_t n) const;
 };
 
+struct path_elements {
+    char pathname_[128];
+    char* path_elements_[32];
+
+    size_t depth_ = 0;
+
+    inline path_elements(const char* pathname) {
+        strcpy(pathname_, pathname);
+        int length = strlen(pathname_) + 1;
+        int start_pos = 0;
+        for (int i = 0; i < length; i++) {
+            if (pathname_[i] == '/' || pathname_[i] == '\0') {
+                pathname_[i] = '\0';
+                path_elements_[depth_] = &pathname_[start_pos];
+                start_pos = i + 1;
+                depth_++;
+                // TODO check for invalid pathnames
+            }
+        }
+    }
+
+    inline char* operator[](size_t i);
+    inline int depth();
+    inline char* last();
+};
+
 
 // System call numbers (passed in `%rax` at `syscall` time)
 
@@ -293,6 +319,8 @@ struct bitset_view {
 #define SYSCALL_MSLEEP          132
 #define SYSCALL_GETPPID         133
 #define SYSCALL_WAITPID         134
+#define SYSCALL_MKDIR           135
+#define SYSCALL_RMDIR           136
 
 // System call error return values
 
@@ -606,6 +634,19 @@ inline size_t bitset_view::find_x_contiguous_bits(size_t x) const {
         i = lsz + 1;
     }
     return found;
+}
+
+inline char* path_elements::operator[](size_t i) {
+    assert(i < depth_);
+    return path_elements_[i];
+}
+
+inline int path_elements::depth() {
+    return depth_;
+}
+
+inline char* path_elements::last() {
+    return path_elements_[depth_ - 1];
 }
 
 #endif /* !CHICKADEE_LIB_HH */

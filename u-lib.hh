@@ -195,6 +195,18 @@ inline int sys_open(const char* path, int flags) {
                         flags);
 }
 
+inline int sys_mkdir(const char* path, int flags) {
+    access_memory(path);
+    return make_syscall(SYSCALL_MKDIR, reinterpret_cast<uintptr_t>(path),
+                        flags);
+}
+
+inline int sys_rmdir(const char* path, int flags) {
+    access_memory(path);
+    return make_syscall(SYSCALL_MKDIR, reinterpret_cast<uintptr_t>(path),
+                        flags);
+}
+
 // sys_pipe(pfd)
 //    Create a pipe.
 inline int sys_pipe(int pfd[2]) {

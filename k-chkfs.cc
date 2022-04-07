@@ -416,8 +416,12 @@ void inode::put() {
 //    a read lock on `dirino`. The returned inode has a reference that
 //    the caller should eventually release with `ino->put()`.
 
-chkfs::inode* chkfsstate::lookup_inode(inode* dirino,
-                                       const char* filename) {
+// chkfs::inode* chkfsstate::lookup_inode(inode* dirino,
+//                                             const char* filename) {
+//     return lookup_inode_for_type(dirino, filename, chkfs::type_regular);
+// }
+
+chkfs::inode* chkfsstate::lookup_inode_for_type(inode* dirino, const char* directory_name, int inode_type) {
     chkfs_fileiter it(dirino);
 
     // read directory to find file inode
@@ -427,9 +431,14 @@ chkfs::inode* chkfsstate::lookup_inode(inode* dirino,
             size_t bsz = min(dirino->size - diroff, blocksize);
             auto dirent = reinterpret_cast<chkfs::dirent*>(e->buf_);
             for (unsigned i = 0; i * sizeof(*dirent) < bsz; ++i, ++dirent) {
-                if (dirent->inum && strcmp(dirent->name, filename) == 0) {
-                    in = dirent->inum;
-                    break;
+                if (dirent->inum && strcmp(dirent->name, directory_name) == 0) {
+                    inode* file_inode = get_inode(dirent->inum);
+                    if (file_inode->type == inode_type) {
+                        in = dirent->inum;
+                        file_inode->put();
+                        break;
+                    }
+                    file_inode->put();
                 }
             }
             e->put();
@@ -440,15 +449,15 @@ chkfs::inode* chkfsstate::lookup_inode(inode* dirino,
     return get_inode(in);
 }
 
+chkfs::inode* chkfsstate::lookup_directory_inode(inode* dirino, const char* directory_name) {
+    return lookup_inode_for_type(dirino, directory_name, chkfs::type_directory);
+}
 
-// chkfsstate::lookup_inode(filename)
-//    Looks up `filename` in the root directory.
-
-chkfs::inode* chkfsstate::lookup_inode(const char* filename) {
+chkfs::inode* chkfsstate::lookup_directory_inode(const char* directory_name) {
     auto dirino = get_inode(1);
     if (dirino) {
         dirino->lock_read();
-        auto ino = fs.lookup_inode(dirino, filename);
+        auto ino = fs.lookup_directory_inode(dirino, directory_name);
         dirino->unlock_read();
         dirino->put();
         return ino;
@@ -457,7 +466,59 @@ chkfs::inode* chkfsstate::lookup_inode(const char* filename) {
     }
 }
 
-chkfs::inum_t chkfsstate::create_inode() {
+// chkfsstate::lookup_inode(filename)
+//    Looks up `filename` in the root directory.
+
+// chkfs::inode* chkfsstate::lookup_inode(const char* filename) {
+//     auto dirino = get_inode(1);
+//     if (dirino) {
+//         dirino->lock_read();
+//         auto ino = fs.lookup_inode(dirino, filename);
+//         dirino->unlock_read();
+//         dirino->put();
+//         return ino;
+//     } else {
+//         return nullptr;
+//     }
+// }
+
+
+chkfs::inode* chkfsstate::lookup_file_inode(inode* dirino,
+                                            const char* filename) {
+    return lookup_inode_for_type(dirino, filename, chkfs::type_regular);
+}
+
+chkfs::inode* chkfsstate::lookup_containing_directory_inode(const char* filename) {
+    path_elements path(filename);
+    chkfs::inode* dirino = get_inode(1);
+    assert(dirino);
+    for (int i = 0; i < path.depth() - 1; i++) {
+        dirino->lock_read();
+        chkfs::inode* next_dirino = lookup_directory_inode(dirino, path[i]);
+        dirino->unlock_read();
+        dirino->put();
+        dirino = next_dirino;
+        if (!dirino) {
+            break;
+        }
+    }
+    return dirino;
+}
+
+chkfs::inode* chkfsstate::lookup_file_inode(const char* filename) {
+    path_elements path(filename);
+    chkfs::inode* dirino = lookup_containing_directory_inode(filename);
+    if (!dirino) {
+        return nullptr;
+    }
+    dirino->lock_read();
+    chkfs::inode* file_inode = lookup_file_inode(dirino, path.last());
+    dirino->unlock_read();
+    dirino->put();
+    return file_inode;
+}
+
+chkfs::inum_t chkfsstate::create_inode(int inode_type) {
     auto& bc = bufcache::get();
     auto superblock_entry = bc.get_disk_entry(0);
     assert(superblock_entry);
@@ -477,7 +538,7 @@ chkfs::inum_t chkfsstate::create_inode() {
                 if (ino[j].type == 0 && potential_inum != 0 && potential_inum != 1) {
                     inode_entry->get_write();
                     inum = potential_inum;
-                    ino[j].type = chkfs::type_regular;
+                    ino[j].type = inode_type;
                     ino[j].nlink = 1;
                     ino[j].size = 0;
                     inode_entry->put_write();
@@ -499,7 +560,7 @@ chkfs::inum_t chkfsstate::create_inode() {
     return inum;
 }
 
-int chkfsstate::create_directory(inode* dirino, const char* filename, inum_t inum) {
+int chkfsstate::create_dirent(inode* dirino, const char* filename, inum_t inum) {
     bool found = false;
     chkfs_fileiter it(dirino);
     for (size_t diroff = 0; !found; diroff += blocksize) {
@@ -537,21 +598,27 @@ int chkfsstate::create_directory(inode* dirino, const char* filename, inum_t inu
     return 1;
 }
 
-chkfs::inode* chkfsstate::create_file(const char* filename) {
-    inum_t inum = create_inode();
-    // assert(inum > 1);
+chkfs::inode* chkfsstate::create_file_in_root_directory(const char* filename) {
+    inum_t inum = create_inode(chkfs::type_regular);
 
     auto dirino = get_inode(1);
     if (dirino) {
         dirino->lock_write();
-        int result = fs.create_directory(dirino, filename, inum);
+        int result = fs.create_dirent(dirino, filename, inum);
         dirino->unlock_write();
         dirino->put();
         return get_inode(inum);
     } else {
         return nullptr;
     }
+}
 
+chkfs::inode* chkfsstate::create_file_in_directory(chkfs::inode* dirino, const char* filename) {
+    inum_t inum = create_inode(chkfs::type_regular);
+
+    int result = fs.create_dirent(dirino, filename, inum);
+
+    return get_inode(inum);
 }
 
 // chkfsstate::allocate_extent(unsigned count)

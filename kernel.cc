@@ -311,6 +311,12 @@ uintptr_t proc::run_syscall(regstate* regs) {
         return bufcache::get().sync(drop);
     }
 
+    case SYSCALL_MKDIR:
+        return syscall_mkdir(regs);
+
+    case SYSCALL_RMDIR:
+        return syscall_rmdir(regs);
+
     case SYSCALL_MAP_CONSOLE: {
         uintptr_t addr = reinterpret_cast<uintptr_t>(regs->reg_rdi);
         if (addr > VA_LOWMAX || (addr % PAGESIZE) != 0) {
@@ -433,9 +439,6 @@ int proc::syscall_msleep(regstate* regs) {
     if (interrupt_sleep_) {
         return E_INTR;
     }
-    // while(long(end_time - ticks.load()) > 0) {
-    //     yield();
-    // }
 
     return 0;
 }
@@ -479,11 +482,6 @@ int proc::waitpid(pid_t pid, int* stat, int options) {
                 waiter().block_until(wq_, [&] () {
                     return wait_child->pstate_ == ps_exited;
                 }, guard);
-                // while (wait_child->pstate_ != ps_exited) {
-                //     guard.unlock();
-                //     yield();
-                //     guard.lock();
-                // }
             }
         }
         wait_child->sibling_links_.erase();
@@ -507,12 +505,6 @@ int proc::waitpid(pid_t pid, int* stat, int options) {
                     }
                     return !!wait_child;
                 }, guard);
-                // while (!wait_child) {
-                //     guard.unlock();
-                //     yield();
-                //     guard.lock();
-                //     wait_child = get_any_exited_child();
-                // }
             }
         }
         wait_child->sibling_links_.erase();
@@ -634,14 +626,27 @@ int proc::syscall_open(regstate* regs) {
 
     char* pathname = reinterpret_cast<char*>(pathname_ptr);
     
+
     // create file
     if ((flag & OF_CREATE) && (flag & OF_WRITE)) {
         log_printf("creating file %s \n", pathname);
-        chkfsstate::get().create_file(pathname);
+        
+        path_elements path(pathname);
+        
+        chkfs::inode* dirino =  chkfsstate::get().lookup_containing_directory_inode(pathname);
+        if (!dirino) {
+            return E_NOENT;
+        }
+        dirino->lock_write();
+        chkfs::inode* created_ino = chkfsstate::get().create_file_in_directory(dirino, path.last());
+        dirino->unlock_write();
+        dirino->put();
+        created_ino->put();
     }
 
     chkfsstate::inode* ino = nullptr;
-    ino = chkfsstate::get().lookup_inode(pathname);
+
+    ino = chkfsstate::get().lookup_file_inode(pathname);
     if (!ino) {
         return E_NOENT;
     }
@@ -770,6 +775,55 @@ int proc::assign_to_open_fd(file* f, spinlock_guard& guard) {
     }
     fd_table_[open_fd] = f;
     return open_fd;
+}
+
+int proc::syscall_mkdir(regstate* regs) {
+    int errno;
+    uintptr_t pathname_ptr = regs->reg_rdi;
+    uint64_t flag = regs->reg_rsi;
+    if (!is_valid_pathname(pathname_ptr)) {
+        return E_FAULT;
+    }
+
+    const char* pathname = reinterpret_cast<const char*>(pathname_ptr);
+
+    path_elements path(pathname);
+
+    chkfs::inode* dirino = chkfsstate::get().get_inode(1);
+    assert(dirino);
+    for (int i = 0; i < path.depth() - 1; i++) {
+        dirino->lock_read();
+        chkfs::inode* next_dirino = chkfsstate::get().lookup_directory_inode(dirino, path[i]);
+        dirino->unlock_read();
+        dirino->put();
+        dirino = next_dirino;
+        if (!dirino) {
+            break;
+        }
+    }
+
+    if (!dirino) {
+        log_printf("failed, subdirectory in path missing\n");
+        return -1;
+    }
+
+    chkfs::inode* existing_dirino = chkfsstate::get().lookup_directory_inode(dirino, path[path.depth() - 1]);
+    if (existing_dirino) {
+        existing_dirino->put();
+        log_printf("failed, directory already exists\n");
+        return -1;
+    }
+
+    chkfs::inum_t directory_inum = chkfsstate::get().create_inode(chkfs::type_directory);
+    dirino->lock_write();
+    chkfsstate::get().create_dirent(dirino, path[path.depth() - 1], directory_inum);
+    dirino->unlock_write();
+    dirino->put();
+    return 0;
+}
+
+int proc::syscall_rmdir(regstate* regs) {
+    return 0;
 }
 
 uint64_t proc::syscall_pipe(regstate* regs) {
@@ -930,7 +984,7 @@ int proc::syscall_execv(regstate* regs) {
         goto bad_execv_return;
     }
 
-    ino = chkfsstate::get().lookup_inode(pathname);
+    ino = chkfsstate::get().lookup_file_inode(pathname);
     if (!ino) {
         error_code = E_NOENT;
         goto bad_execv_return;
@@ -1291,7 +1345,7 @@ uintptr_t proc::syscall_readdiskfile(regstate* regs) {
     }
 
     // read root directory to find file inode number
-    auto ino = chkfsstate::get().lookup_inode(filename);
+    auto ino = chkfsstate::get().lookup_file_inode(filename);
     if (!ino) {
         return E_NOENT;
     }

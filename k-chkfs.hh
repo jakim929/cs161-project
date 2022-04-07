@@ -97,18 +97,30 @@ struct chkfsstate {
     // obtain an inode by number
     inode* get_inode(inum_t inum);
 
-    // directory lookup in `dirino`
-    inode* lookup_inode(inode* dirino, const char* name);
-    // directory lookup starting at root directory
-    inode* lookup_inode(const char* name);
+    // // directory lookup in `dirino`
+    // inode* lookup_inode(inode* dirino, const char* name);
+    // // directory lookup starting at root directory
+    // inode* lookup_inode(const char* name);
+
+    inode* lookup_containing_directory_inode(const char* filename);
+
+    inode* lookup_directory_inode(inode* dirino, const char* name);
+    inode* lookup_directory_inode(const char* directory_name);
+
+    inode* lookup_file_inode(inode* dirino, const char* name);
+    inode* lookup_file_inode(const char* directory_name);
+
+    inode* lookup_inode_for_type(inode* dirino, const char* directory_name, int inode_type);
 
     blocknum_t allocate_extent(unsigned count = 1);
 
-    inum_t create_inode();
+    inum_t create_inode(int inode_type);
 
-    int create_directory(inode* dirino, const char* filename, inum_t inum);
+    int create_dirent(inode* dirino, const char* filename, inum_t inum);
 
-    inode* create_file(const char* filename);
+    inode* create_file_in_root_directory(const char* filename);
+
+    inode* create_file_in_directory(chkfs::inode* dirino, const char* filename);
 
   private:
     static chkfsstate fs;
