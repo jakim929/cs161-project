@@ -632,7 +632,6 @@ int proc::syscall_open(regstate* regs) {
         log_printf("creating file %s \n", pathname);
         
         path_elements path(pathname);
-        
         chkfs::inode* dirino =  chkfsstate::get().lookup_containing_directory_inode(pathname);
         if (!dirino) {
             return E_NOENT;
@@ -788,41 +787,30 @@ int proc::syscall_mkdir(regstate* regs) {
     const char* pathname = reinterpret_cast<const char*>(pathname_ptr);
 
     path_elements path(pathname);
-
-    chkfs::inode* dirino = chkfsstate::get().get_inode(1);
-    assert(dirino);
-    for (int i = 0; i < path.depth() - 1; i++) {
-        dirino->lock_read();
-        chkfs::inode* next_dirino = chkfsstate::get().lookup_directory_inode(dirino, path[i]);
-        dirino->unlock_read();
-        dirino->put();
-        dirino = next_dirino;
-        if (!dirino) {
-            break;
-        }
-    }
-
+    chkfs::inode* dirino =  chkfsstate::get().lookup_containing_directory_inode(pathname);
+  
     if (!dirino) {
         log_printf("failed, subdirectory in path missing\n");
-        return -1;
+        return E_NOENT;
     }
 
-    chkfs::inode* existing_dirino = chkfsstate::get().lookup_directory_inode(dirino, path[path.depth() - 1]);
+    chkfs::inode* existing_dirino = chkfsstate::get().lookup_directory_inode(dirino, path.last());
     if (existing_dirino) {
         existing_dirino->put();
         log_printf("failed, directory already exists\n");
-        return -1;
+        return E_INVAL;
     }
 
     chkfs::inum_t directory_inum = chkfsstate::get().create_inode(chkfs::type_directory);
     dirino->lock_write();
-    chkfsstate::get().create_dirent(dirino, path[path.depth() - 1], directory_inum);
+    chkfsstate::get().create_dirent(dirino, path.last(), directory_inum);
     dirino->unlock_write();
     dirino->put();
     return 0;
 }
 
 int proc::syscall_rmdir(regstate* regs) {
+
     return 0;
 }
 
