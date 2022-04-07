@@ -794,7 +794,7 @@ int proc::syscall_mkdir(regstate* regs) {
         return E_NOENT;
     }
 
-    chkfs::inode* existing_dirino = chkfsstate::get().lookup_directory_inode(dirino, path.last());
+    chkfs::inode* existing_dirino = chkfsstate::get().lookup_relative_directory_inode(dirino, path.last());
     if (existing_dirino) {
         existing_dirino->put();
         log_printf("failed, directory already exists\n");
@@ -810,6 +810,22 @@ int proc::syscall_mkdir(regstate* regs) {
 }
 
 int proc::syscall_rmdir(regstate* regs) {
+    uintptr_t pathname_ptr = regs->reg_rdi;
+    uint64_t flag = regs->reg_rsi;
+    if (!is_valid_pathname(pathname_ptr)) {
+        return E_FAULT;
+    }
+
+    const char* pathname = reinterpret_cast<const char*>(pathname_ptr);
+
+    chkfs::inode* directory_inode = chkfsstate::get().lookup_directory_inode(pathname);
+
+    if (!directory_inode) {
+        return E_NOENT;
+    }
+
+    // Check if directory is empty
+    
 
     return 0;
 }

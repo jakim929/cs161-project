@@ -104,13 +104,16 @@ struct chkfsstate {
 
     inode* lookup_containing_directory_inode(const char* filename);
 
-    inode* lookup_directory_inode(inode* dirino, const char* name);
+    inode* lookup_relative_directory_inode(inode* dirino, const char* name);
+    inode* lookup_relative_directory_inode(const char* directory_name);
+
     inode* lookup_directory_inode(const char* directory_name);
 
-    inode* lookup_file_inode(inode* dirino, const char* name);
+
+    inode* lookup_relative_file_inode(inode* dirino, const char* name);
     inode* lookup_file_inode(const char* directory_name);
 
-    inode* lookup_inode_for_type(inode* dirino, const char* directory_name, int inode_type);
+    inode* lookup_relative_inode_for_type(inode* dirino, const char* directory_name, int inode_type);
 
     blocknum_t allocate_extent(unsigned count = 1);
 

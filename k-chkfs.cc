@@ -418,10 +418,10 @@ void inode::put() {
 
 // chkfs::inode* chkfsstate::lookup_inode(inode* dirino,
 //                                             const char* filename) {
-//     return lookup_inode_for_type(dirino, filename, chkfs::type_regular);
+//     return lookup_relative_inode_for_type(dirino, filename, chkfs::type_regular);
 // }
 
-chkfs::inode* chkfsstate::lookup_inode_for_type(inode* dirino, const char* directory_name, int inode_type) {
+chkfs::inode* chkfsstate::lookup_relative_inode_for_type(inode* dirino, const char* directory_name, int inode_type) {
     chkfs_fileiter it(dirino);
 
     // read directory to find file inode
@@ -449,21 +449,34 @@ chkfs::inode* chkfsstate::lookup_inode_for_type(inode* dirino, const char* direc
     return get_inode(in);
 }
 
-chkfs::inode* chkfsstate::lookup_directory_inode(inode* dirino, const char* directory_name) {
-    return lookup_inode_for_type(dirino, directory_name, chkfs::type_directory);
+chkfs::inode* chkfsstate::lookup_relative_directory_inode(inode* dirino, const char* directory_name) {
+    return lookup_relative_inode_for_type(dirino, directory_name, chkfs::type_directory);
 }
 
-chkfs::inode* chkfsstate::lookup_directory_inode(const char* directory_name) {
+chkfs::inode* chkfsstate::lookup_relative_directory_inode(const char* directory_name) {
     auto dirino = get_inode(1);
     if (dirino) {
         dirino->lock_read();
-        auto ino = fs.lookup_directory_inode(dirino, directory_name);
+        auto ino = fs.lookup_relative_directory_inode(dirino, directory_name);
         dirino->unlock_read();
         dirino->put();
         return ino;
     } else {
         return nullptr;
     }
+}
+
+chkfs::inode* chkfsstate::lookup_directory_inode(const char* directory_name) {
+    path_elements path(directory_name);
+    chkfs::inode* dirino = lookup_containing_directory_inode(directory_name);
+    if (!dirino) {
+        return nullptr;
+    }
+    dirino->lock_read();
+    chkfs::inode* directory_inode = lookup_relative_directory_inode(dirino, path.last());
+    dirino->unlock_read();
+    dirino->put();
+    return directory_inode;
 }
 
 // chkfsstate::lookup_inode(filename)
@@ -483,18 +496,13 @@ chkfs::inode* chkfsstate::lookup_directory_inode(const char* directory_name) {
 // }
 
 
-chkfs::inode* chkfsstate::lookup_file_inode(inode* dirino,
-                                            const char* filename) {
-    return lookup_inode_for_type(dirino, filename, chkfs::type_regular);
-}
-
 chkfs::inode* chkfsstate::lookup_containing_directory_inode(const char* filename) {
     path_elements path(filename);
     chkfs::inode* dirino = get_inode(1);
     assert(dirino);
     for (int i = 0; i < path.depth() - 1; i++) {
         dirino->lock_read();
-        chkfs::inode* next_dirino = lookup_directory_inode(dirino, path[i]);
+        chkfs::inode* next_dirino = lookup_relative_directory_inode(dirino, path[i]);
         dirino->unlock_read();
         dirino->put();
         dirino = next_dirino;
@@ -505,6 +513,11 @@ chkfs::inode* chkfsstate::lookup_containing_directory_inode(const char* filename
     return dirino;
 }
 
+chkfs::inode* chkfsstate::lookup_relative_file_inode(inode* dirino,
+                                            const char* filename) {
+    return lookup_relative_inode_for_type(dirino, filename, chkfs::type_regular);
+}
+
 chkfs::inode* chkfsstate::lookup_file_inode(const char* filename) {
     path_elements path(filename);
     chkfs::inode* dirino = lookup_containing_directory_inode(filename);
@@ -512,7 +525,7 @@ chkfs::inode* chkfsstate::lookup_file_inode(const char* filename) {
         return nullptr;
     }
     dirino->lock_read();
-    chkfs::inode* file_inode = lookup_file_inode(dirino, path.last());
+    chkfs::inode* file_inode = lookup_relative_file_inode(dirino, path.last());
     dirino->unlock_read();
     dirino->put();
     return file_inode;
