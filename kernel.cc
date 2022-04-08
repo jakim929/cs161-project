@@ -72,8 +72,6 @@ void init_process_fn() {
 
 void issue_prefetch_process_fn() {
     auto& bc = bufcache::get();
-    log_printf("start proces\n");
-    // assert(bc.prefetch_queue_.empty());
     while(true) {
         spinlock_guard guard(bc.prefetch_queue_lock_);
         waiter().block_until(bc.prefetch_wait_queue_, [&] () {

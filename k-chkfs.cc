@@ -203,7 +203,16 @@ size_t bufcache::maybe_evict(irqstate& irqs) {
     bcentry* lru_bcentry = nullptr;
     {
         spinlock_guard eviction_queue_guard(eviction_queue_lock_);
-        lru_bcentry = eviction_queue_.pop_back();
+        for (bcentry* a = eviction_queue_.back(); a; a = bc.eviction_queue_.prev(a)) {
+            spinlock_guard guard(a->lock_);
+            if (a->estate_.load() != bcentry::es_prefetching) {
+                lru_bcentry = a;
+                break;
+            }
+        }
+        if (lru_bcentry) {
+            lru_bcentry->eviction_queue_link_.erase();
+        }
     }
 
     if (!lru_bcentry) {
