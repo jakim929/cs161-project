@@ -407,7 +407,7 @@ int bufcache::sync(int drop) {
             // validity checks: referenced entries aren't empty; if drop > 1,
             // no data blocks are referenced
             assert(e_[i].ref_ == 0 || e_[i].estate_ != bcentry::es_empty);
-            if (e_[i].ref_ > 0 && drop > 1 && e_[i].bn_ >= 2 && e_[i].estate_ != bcentry::es_prefetching) {
+            if (e_[i].ref_ > 0 && drop > 1 && e_[i].bn_ >= 2 && e_[i].estate_.load() != bcentry::es_prefetching) {
                 error_printf(CPOS(22, 0), COLOR_ERROR, "sync(2): block %u has nonzero reference count\n", e_[i].bn_);
                 assert_fail(__FILE__, __LINE__, "e_[i].bn_ < 2");
             }
@@ -780,31 +780,6 @@ int chkfsstate::remove_dirent(inode* dirino, const char* filename, inum_t inum) 
         }
     }
     return 0;
-
-
-    // chkfs_fileiter it(dirino);
-    // bool removed = false;
-    // for (size_t diroff = 0;; diroff += blocksize) {
-    //     if (bcentry* e = it.find(diroff).get_disk_entry()) {
-    //         size_t bsz = min(dirino->size - diroff, blocksize);
-    //         auto dirent = reinterpret_cast<chkfs::dirent*>(e->buf_);
-    //         e->get_write();
-    //         for (unsigned i = 0; i * sizeof(*dirent) < bsz; ++i, ++dirent) {
-    //             if (dirent->inum == inum && strcmp(dirent->name, filename) == 0) {
-    //                 dirent->inum = 0;
-    //                 dirent->name[0] = '\0';
-    //                 e->put_write();
-    //                 e->put();
-    //                 return 1;
-    //             }
-    //         }
-    //         e->put_write();
-    //         e->put();
-    //     } else {
-    //         return E_NOSPC;
-    //     }
-    // }
-    // return 0;
 }
 
 
