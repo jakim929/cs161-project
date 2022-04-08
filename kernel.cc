@@ -22,6 +22,8 @@ int total_resume_count = 0;
 static void tick();
 static void boot_process_start(pid_t pid, pid_t ppid, const char* program_name);
 void init_process_start(pid_t pid, pid_t ppid);
+void issue_prefetch_process_start(pid_t pid, pid_t ppid);
+void handle_prefetch_result_process_start(pid_t pid, pid_t ppid);
 
 // kernel_start(command)
 //    Initialize the hardware and processes and start running. The `command`
@@ -44,6 +46,9 @@ void kernel_start(const char* command) {
     // start initial kernel process
     init_process_start(1, 1);
 
+    // kernel process to handle prefetching
+    issue_prefetch_process_start(3, 1);
+
     // start first user process
     boot_process_start(2, 1, CHICKADEE_FIRST_PROCESS);
 
@@ -61,6 +66,46 @@ void init_process_fn() {
                 process_halt();
             }
             p->yield();
+        }
+    }
+}
+
+void issue_prefetch_process_fn() {
+    auto& bc = bufcache::get();
+    log_printf("start proces\n");
+    // assert(bc.prefetch_queue_.empty());
+    while(true) {
+        spinlock_guard guard(bc.prefetch_queue_lock_);
+        waiter().block_until(bc.prefetch_wait_queue_, [&] () {
+            bool has_new = false;
+            for (int i = 0; i < 32; i++) {
+                if (bc.prefetch_queue_[(i + bc.prefetch_queue_head_) % 32].bn_ >= 0) {
+                    has_new = true;
+                    break;
+                }
+            }
+            return has_new;
+        }, guard);
+
+        int block_to_get = -1;
+        for (int i = 0; i < 32; i++) {
+            int id = i + bc.prefetch_queue_head_;
+
+            if (bc.prefetch_queue_[id % 32].bn_ >= 0) {
+                block_to_get = bc.prefetch_queue_[id % 32].bn_;
+                bc.prefetch_queue_[id % 32].bn_ = -1;
+                bc.prefetch_queue_head_ = (bc.prefetch_queue_head_ + 1) % 32;
+                break;
+            }
+
+        }
+        
+        if (block_to_get >= 0) {
+            guard.unlock();
+            bcentry* b = bc.get_disk_entry_for_prefetch(block_to_get);
+            log_printf("prefetched %d\n", block_to_get);
+            b->put();
+            guard.lock();
         }
     }
 }
@@ -91,6 +136,26 @@ void init_process_start(pid_t pid, pid_t ppid) {
     p->fd_table_[0] = kbc_file;
     p->fd_table_[1] = kbc_file;
     p->fd_table_[2] = kbc_file;
+
+    cpus[pid % ncpu].enqueue(p);
+}
+
+void issue_prefetch_process_start(pid_t pid, pid_t ppid) {
+    proc* p = knew<proc>();
+    p->init_kernel(pid, ppid, &issue_prefetch_process_fn);
+    {
+        spinlock_guard guard(ptable_lock);
+        assert(!ptable[pid]);
+        ptable[pid] = p;
+    }
+
+    for (int i = 0; i < N_FILE_DESCRIPTORS; i++) {
+        p->fd_table_[i] = nullptr;
+    }
+
+    p->fd_table_[0] = open_file_table[0];
+    p->fd_table_[1] = open_file_table[0];
+    p->fd_table_[2] = open_file_table[0];
 
     cpus[pid % ncpu].enqueue(p);
 }

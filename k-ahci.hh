@@ -140,6 +140,8 @@ struct ahcistate {
     inline int write(const void* buf, size_t sz, size_t off);
     int read_or_write(idecommand cmd, void* buf, size_t sz, size_t off);
 
+    int read_or_write_nonblocking(idecommand command, void* buf, size_t sz, size_t off, std::atomic<int>& fetch_status);
+
     // interrupt handlers
     void handle_interrupt();
     void handle_error_interrupt();

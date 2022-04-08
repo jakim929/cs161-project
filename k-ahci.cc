@@ -128,6 +128,34 @@ int ahcistate::read_or_write(idecommand command, void* buf, size_t sz,
     return r;
 }
 
+int ahcistate::read_or_write_nonblocking(idecommand command, void* buf, size_t sz, size_t off, std::atomic<int>& fetch_status) {
+    // `sz` and `off` must be sector-aligned
+    assert(sz % sectorsize == 0 && off % sectorsize == 0);
+
+    // obtain lock
+    auto irqs = lock_.lock();
+
+    // block until ready for command
+    waiter().block_until(wq_, [&] () {
+        return (slots_outstanding_mask_ ^ (-1));
+    }, lock_, irqs);
+
+    for (int i = 0; i < 32; i++) {
+        if (!slot_status_[i]) {
+            fetch_status = E_AGAIN;
+            clear(i);
+            push_buffer(i, buf, sz);
+            issue_ncq(i, command, off / sectorsize);
+            slot_status_[i] = &fetch_status;
+            break;
+        }
+    }
+
+    lock_.unlock(irqs);
+
+    return fetch_status;
+}
+
 
 // FUNCTIONS FOR HANDLING INTERRUPTS
 

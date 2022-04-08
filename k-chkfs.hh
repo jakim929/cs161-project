@@ -9,11 +9,16 @@
 
 using bcentry_clean_function = void (*)(bcentry*);
 
+struct prefetch_item {
+    int bn_ = -1;
+    list_links prefetch_queue_link_;
+};
+
 struct bcentry {
     using blocknum_t = chkfs::blocknum_t;
 
     enum estate_t {
-        es_empty, es_allocated, es_loading, es_clean, es_dirty
+        es_empty, es_allocated, es_loading, es_clean, es_dirty, es_prefetching
     };
 
     std::atomic<int> estate_ = es_empty;
@@ -25,6 +30,9 @@ struct bcentry {
 
     list_links eviction_queue_link_;
     list_links dirty_queue_link_;
+    list_links prefetch_queue_link_;
+
+    std::atomic<int> fetch_status_;
 
     wait_queue write_reference_wq_;
     std::atomic<int> write_reference_ = 0;
@@ -49,6 +57,7 @@ struct bcentry {
     // internal functions
     void clear();
     bool load(irqstate& irqs, bcentry_clean_function cleaner);
+    bool load_for_prefetch(irqstate& irqs, bcentry_clean_function cleaner);
 };
 
 struct bufcache {
@@ -60,15 +69,27 @@ struct bufcache {
     wait_queue read_wq_;
     bcentry e_[ne];
 
+    prefetch_item prefetch_queue_[32];
+    int prefetch_queue_head_ = 0;
+    // list<bcentry, &bcentry::prefetch_queue_link_> prefetch_queue_;
+    spinlock prefetch_queue_lock_;
+    wait_queue prefetch_wait_queue_;
+
     list<bcentry, &bcentry::eviction_queue_link_> eviction_queue_;
     spinlock eviction_queue_lock_;
     list<bcentry, &bcentry::dirty_queue_link_> dirty_queue_;
     spinlock dirty_queue_lock_;
 
+
+
     static inline bufcache& get();
 
     bcentry* get_disk_entry(blocknum_t bn,
                             bcentry_clean_function cleaner = nullptr);
+    void prefetch(chkfs::blocknum_t bn, int n_blocks);
+
+    bcentry* get_disk_entry_for_prefetch(chkfs::blocknum_t bn,
+                                  bcentry_clean_function cleaner = nullptr);
 
     size_t maybe_evict(irqstate& irqs);
     
