@@ -18,7 +18,34 @@ proc::proc() {
 //    Initialize this `proc` as a new runnable user process with PID `pid`
 //    and initial page table `pt`.
 
-void proc::init_user(pid_t pid, pid_t ppid, x86_64_pagetable* pt) {
+// void proc::init_user(pid_t pid, pid_t ppid, x86_64_pagetable* pt) {
+//     uintptr_t addr = reinterpret_cast<uintptr_t>(this);
+//     assert(!(addr & PAGEOFFMASK));
+//     // ensure layout `k-exception.S` expects
+//     assert(reinterpret_cast<uintptr_t>(&id_) == addr);
+//     assert(reinterpret_cast<uintptr_t>(&regs_) == addr + 8);
+//     assert(reinterpret_cast<uintptr_t>(&yields_) == addr + 16);
+//     assert(reinterpret_cast<uintptr_t>(&pstate_) == addr + 24);
+//     // ensure initialized page table
+//     assert(!(reinterpret_cast<uintptr_t>(pt) & PAGEOFFMASK));
+//     assert(pt->entry[256] == early_pagetable->entry[256]);
+//     assert(pt->entry[511] == early_pagetable->entry[511]);
+//     log_printf("creating user process %d from %d\n", pid, ppid);
+
+//     id_ = pid;
+//     pagetable_ = pt;
+//     pstate_ = proc::ps_runnable;
+//     ppid_ = ppid;
+
+//     regs_ = reinterpret_cast<regstate*>(addr + PROCSTACK_SIZE) - 1;
+//     memset(regs_, 0, sizeof(regstate));
+//     regs_->reg_cs = SEGSEL_APP_CODE | 3;
+//     regs_->reg_ss = SEGSEL_APP_DATA | 3;
+//     regs_->reg_rflags = EFLAGS_IF;
+//     regs_->reg_swapgs = 1;
+// }
+
+void proc::init_user(pid_t pid, threadgroup* tg) {
     uintptr_t addr = reinterpret_cast<uintptr_t>(this);
     assert(!(addr & PAGEOFFMASK));
     // ensure layout `k-exception.S` expects
@@ -27,17 +54,17 @@ void proc::init_user(pid_t pid, pid_t ppid, x86_64_pagetable* pt) {
     assert(reinterpret_cast<uintptr_t>(&yields_) == addr + 16);
     assert(reinterpret_cast<uintptr_t>(&pstate_) == addr + 24);
     // ensure initialized page table
-    assert(!(reinterpret_cast<uintptr_t>(pt) & PAGEOFFMASK));
-    assert(pt->entry[256] == early_pagetable->entry[256]);
-    assert(pt->entry[511] == early_pagetable->entry[511]);
-    log_printf("creating user process %d from %d\n", pid, ppid);
+    assert(!(reinterpret_cast<uintptr_t>(tg->pagetable_) & PAGEOFFMASK));
+    assert(tg->pagetable_->entry[256] == early_pagetable->entry[256]);
+    assert(tg->pagetable_->entry[511] == early_pagetable->entry[511]);
+    log_printf("creating user process %d from %d for thread_group %d\n", pid, tg->ppid_, tg->tgid_);
 
     id_ = pid;
-    pagetable_ = pt;
+    tgid_ = tg->tgid_;
+    tg_ = tg;
+    pagetable_ = tg->pagetable_;
     pstate_ = proc::ps_runnable;
-    ppid_ = ppid;
-    // DISABLED AFTER EXECV
-    // sibling_links_.reset();
+    ppid_ = tg->ppid_;
 
     regs_ = reinterpret_cast<regstate*>(addr + PROCSTACK_SIZE) - 1;
     memset(regs_, 0, sizeof(regstate));
@@ -47,36 +74,44 @@ void proc::init_user(pid_t pid, pid_t ppid, x86_64_pagetable* pt) {
     regs_->reg_swapgs = 1;
 }
 
-void proc::init_fd_table() {
-    for (int i = 0; i < N_FILE_DESCRIPTORS; i++) {
-        fd_table_[i] = nullptr;
-    }
-}
-
-void proc::copy_fd_table_from_proc(proc* source) {
-    spinlock_guard fd_guard(source->fd_table_lock_);
-    for (int i = 0; i < N_FILE_DESCRIPTORS; i++) {
-        file* file = source->fd_table_[i];
-        if (file) {
-            spinlock_guard guard(file->ref_count_lock_);
-            file->ref_count_++;
-            fd_table_[i] = file;
-        }
-    }
-}
-
 // proc::init_kernel(pid, f)
 //    Initialize this `proc` as a new kernel process with PID `pid`,
 //    starting at function `f`.
 
-void proc::init_kernel(pid_t pid, pid_t ppid, void (*f)()) {
+// void proc::init_kernel(pid_t pid, pid_t ppid, void (*f)()) {
+//     uintptr_t addr = reinterpret_cast<uintptr_t>(this);
+//     assert(!(addr & PAGEOFFMASK));
+
+//     id_ = pid;
+//     ppid_ = ppid;
+//     sibling_links_.reset();
+//     pagetable_ = early_pagetable;
+//     pstate_ = proc::ps_runnable;
+
+//     regs_ = reinterpret_cast<regstate*>(addr + PROCSTACK_SIZE) - 1;
+//     memset(regs_, 0, sizeof(regstate));
+//     regs_->reg_cs = SEGSEL_KERN_CODE;
+//     regs_->reg_ss = SEGSEL_KERN_DATA;
+//     regs_->reg_rflags = EFLAGS_IF;
+//     regs_->reg_rsp = addr + PROCSTACK_SIZE;
+//     regs_->reg_rip = reinterpret_cast<uintptr_t>(f);
+//     regs_->reg_rdi = addr;
+
+//     for (int i = 0; i < N_FILE_DESCRIPTORS; i++) {
+//         fd_table_[i] = nullptr;
+//     }
+// }
+
+void proc::init_kernel(pid_t pid, threadgroup* tg, void (*f)()) {
     uintptr_t addr = reinterpret_cast<uintptr_t>(this);
     assert(!(addr & PAGEOFFMASK));
 
     id_ = pid;
-    ppid_ = ppid;
+    tgid_ = tg->tgid_;
+    tg_ = tg;
+    ppid_ = tg->ppid_;
     sibling_links_.reset();
-    pagetable_ = early_pagetable;
+    pagetable_ = tg->pagetable_;
     pstate_ = proc::ps_runnable;
 
     regs_ = reinterpret_cast<regstate*>(addr + PROCSTACK_SIZE) - 1;
@@ -87,10 +122,6 @@ void proc::init_kernel(pid_t pid, pid_t ppid, void (*f)()) {
     regs_->reg_rsp = addr + PROCSTACK_SIZE;
     regs_->reg_rip = reinterpret_cast<uintptr_t>(f);
     regs_->reg_rdi = addr;
-
-    for (int i = 0; i < N_FILE_DESCRIPTORS; i++) {
-        fd_table_[i] = nullptr;
-    }
 }
 
 

@@ -142,6 +142,8 @@ void idle() {
 
 void cpustate::init_idle_task() {
     assert(!idle_task_);
+    threadgroup* idle_task_tg = knew<threadgroup>();
+    idle_task_tg->init(-1, -1, early_pagetable);
     idle_task_ = knew<proc>();
-    idle_task_->init_kernel(-1, -1, idle);
+    idle_task_->init_kernel(-1, idle_task_tg, idle);
 }

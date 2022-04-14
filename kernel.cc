@@ -20,8 +20,8 @@ timingwheel timer_queue;
 int total_resume_count = 0;
 
 static void tick();
-static void boot_process_start(pid_t pid, pid_t ppid, const char* program_name);
-void init_process_start(pid_t pid, pid_t ppid);
+static void boot_process_start(pid_t tgid, pid_t pid, pid_t ppid, const char* program_name);
+void init_process_start(pid_t tgid, pid_t pid, pid_t ppid);
 void issue_prefetch_process_start(pid_t pid, pid_t ppid);
 void handle_prefetch_result_process_start(pid_t pid, pid_t ppid);
 
@@ -39,18 +39,22 @@ void kernel_start(const char* command) {
         ptable[i] = nullptr;
     }
 
+    for (pid_t i = 0; i < NTHREADGROUP; i++) {
+        tgtable[i] = nullptr;
+    }
+
     for (int i = 0; i < N_GLOBAL_OPEN_FILES; i++) {
         open_file_table[i] = nullptr;
     }
 
     // start initial kernel process
-    init_process_start(1, 1);
+    init_process_start(1, 1, 1);
 
     // kernel process to handle prefetching
-    issue_prefetch_process_start(3, 1);
+    // issue_prefetch_process_start(3, 1);
 
     // start first user process
-    boot_process_start(2, 1, CHICKADEE_FIRST_PROCESS);
+    boot_process_start(2, 2, 1, CHICKADEE_FIRST_PROCESS);
 
     // start running processes
     cpus[0].schedule(nullptr);
@@ -108,14 +112,9 @@ void issue_prefetch_process_fn() {
     }
 }
 
-void init_process_start(pid_t pid, pid_t ppid) {
-    proc* p = knew<proc>();
-    p->init_kernel(pid, ppid, &init_process_fn);
-    {
-        spinlock_guard guard(ptable_lock);
-        assert(!ptable[pid]);
-        ptable[pid] = p;
-    }
+void init_process_start(pid_t tgid, pid_t pid, pid_t ppid) {
+    threadgroup* tg = knew<threadgroup>();
+    tg->init(tgid, ppid, early_pagetable);
 
     kb_c_vnode* keyboard_console_vnode = knew<kb_c_vnode>();
     assert(keyboard_console_vnode);
@@ -127,33 +126,53 @@ void init_process_start(pid_t pid, pid_t ppid) {
         open_file_table[0] = kbc_file;
         kbc_file->id_ = 0;
     }
-    for (int i = 0; i < N_FILE_DESCRIPTORS; i++) {
-        p->fd_table_[i] = nullptr;
-    }
 
-    p->fd_table_[0] = kbc_file;
-    p->fd_table_[1] = kbc_file;
-    p->fd_table_[2] = kbc_file;
+    tg->fd_table_[0] = kbc_file;
+    tg->fd_table_[1] = kbc_file;
+    tg->fd_table_[2] = kbc_file;
 
-    cpus[pid % ncpu].enqueue(p);
-}
 
-void issue_prefetch_process_start(pid_t pid, pid_t ppid) {
     proc* p = knew<proc>();
-    p->init_kernel(pid, ppid, &issue_prefetch_process_fn);
+    p->init_kernel(pid, tg, &init_process_fn);
     {
         spinlock_guard guard(ptable_lock);
         assert(!ptable[pid]);
         ptable[pid] = p;
     }
-
-    for (int i = 0; i < N_FILE_DESCRIPTORS; i++) {
-        p->fd_table_[i] = nullptr;
+    {
+        spinlock_guard guard(tgtable_lock);
+        assert(!tgtable[tgid]);
+        tgtable[tgid] = tg;
     }
 
-    p->fd_table_[0] = open_file_table[0];
-    p->fd_table_[1] = open_file_table[0];
-    p->fd_table_[2] = open_file_table[0];
+
+    cpus[pid % ncpu].enqueue(p);
+}
+
+void issue_prefetch_process_start(pid_t tgid, pid_t pid, pid_t ppid) {
+    threadgroup* tg = knew<threadgroup>();
+    tg->init(tgid, ppid, early_pagetable);
+    proc* p = knew<proc>();
+    p->init_kernel(pid, tg, &issue_prefetch_process_fn);
+    {
+        spinlock_guard guard(ptable_lock);
+        assert(!ptable[pid]);
+        ptable[pid] = p;
+    }
+    {
+        spinlock_guard guard(tgtable_lock);
+        assert(!tgtable[tgid]);
+        tgtable[tgid] = tg;
+    }
+
+
+    // for (int i = 0; i < N_FILE_DESCRIPTORS; i++) {
+    //     p->fd_table_[i] = nullptr;
+    // }
+
+    // p->fd_table_[0] = open_file_table[0];
+    // p->fd_table_[1] = open_file_table[0];
+    // p->fd_table_[2] = open_file_table[0];
 
     cpus[pid % ncpu].enqueue(p);
 }
@@ -164,22 +183,26 @@ void issue_prefetch_process_start(pid_t pid, pid_t ppid) {
 //    %rip and %rsp, gives it a stack page, and marks it as runnable.
 //    Only called at initial boot time.
 
-void boot_process_start(pid_t pid, pid_t ppid, const char* name) {
+void boot_process_start(pid_t tgid, pid_t pid, pid_t ppid, const char* name) {
     // look up process image in initfs
     memfile_loader ld(memfile::initfs_lookup(name), kalloc_pagetable());
     assert(ld.memfile_ && ld.pagetable_);
     int r = proc::load(ld);
     assert(r >= 0);
 
-    // allocate process, initialize memory
-    proc* p = knew<proc>();
-    p->init_user(pid, ppid, ld.pagetable_);
-    p->init_fd_table();
-    p->regs_->reg_rip = ld.entry_rip_;
+    // allocate threadgroup
+    threadgroup* tg = knew<threadgroup>();
+    tg->init(tgid, ppid, ld.pagetable_);
 
     // not locking because init process MUST exist
-    assert(ptable[1]);
-    p->copy_fd_table_from_proc(ptable[1]);
+    assert(tgtable[1]);
+    tg->copy_fd_table_from_threadgroup(tgtable[1]);
+
+    // allocate process, initialize memory
+    proc* p = knew<proc>();
+    
+    p->init_user(pid, tg);
+    p->regs_->reg_rip = ld.entry_rip_;
 
     void* stkpg = kalloc(PAGESIZE);
     assert(stkpg);
@@ -194,6 +217,11 @@ void boot_process_start(pid_t pid, pid_t ppid, const char* name) {
         spinlock_guard guard(ptable_lock);
         assert(!ptable[pid]);
         ptable[pid] = p;
+    }
+    {
+        spinlock_guard guard(tgtable_lock);
+        assert(!tgtable[tgid]);
+        tgtable[tgid] = tg;
     }
     {
         spinlock_guard guard(process_hierarchy_lock);
@@ -346,6 +374,7 @@ uintptr_t proc::run_syscall(regstate* regs) {
     }
 
     case SYSCALL_FORK:
+        // return 0;
         return syscall_fork(regs);
 
     case SYSCALL_OPEN:
@@ -573,6 +602,7 @@ int proc::waitpid(pid_t pid, int* stat, int options) {
         wait_child->sibling_links_.erase();
     }
     pid_t freed_pid = wait_child->id_;
+    pid_t freed_tgid = wait_child->tg_->tgid_;
     if (stat != nullptr) {
         *stat = wait_child->exit_status_;
     }
@@ -580,8 +610,13 @@ int proc::waitpid(pid_t pid, int* stat, int options) {
         spinlock_guard guard(ptable_lock);
         ptable[freed_pid] = nullptr;
     }
+    {
+        spinlock_guard guard(tgtable_lock);
+        tgtable[freed_tgid] = nullptr;
+    }
     total_resume_count += wait_child->resume_count_;
     log_printf("proc [%d] resume count: %d total: %d\n", freed_pid, wait_child->resume_count_, total_resume_count);
+    kfree(wait_child->tg_);
     kfree(wait_child);
     return freed_pid;
 }
@@ -595,14 +630,14 @@ int proc::syscall_waitpid(regstate* regs) {
 }
 
 int proc::close_fd(int fd, spinlock_guard& guard) {
-    file* open_file = fd_table_[fd];
+    file* open_file = tg_->fd_table_[fd];
     if (!open_file) {
         return E_BADF;
     }
 
     log_printf("CLOSING fd %d\n", fd);
 
-    fd_table_[fd] = nullptr;
+    tg_->fd_table_[fd] = nullptr;
     {
         spinlock_guard ref_count_guard(open_file->ref_count_lock_);
         open_file->ref_count_--;
@@ -621,7 +656,7 @@ int proc::close_fd(int fd, spinlock_guard& guard) {
 }
 
 bool proc::is_valid_string(char* str, size_t max_char) {
-    for (int i = 0; i < max_char; i++) {
+    for (size_t i = 0; i < max_char; i++) {
         if (str[i] == '\0') {
             return true;
         }
@@ -751,10 +786,10 @@ int proc::syscall_open(regstate* regs) {
 
     return fd;
 
-    open_fail_free_fd_table_slot: {
-        spinlock_guard guard(fd_table_lock_);
-        fd_table_[fd] = nullptr;
-    }
+    // open_fail_free_fd_table_slot: {
+    //     spinlock_guard guard(tg_->fd_table_lock_);
+    //     tg_->fd_table_[fd] = nullptr;
+    // }
 
     open_fail_free_open_file_table_slot: {
         spinlock_guard guard(open_file_table_lock);
@@ -780,7 +815,7 @@ int proc::syscall_open(regstate* regs) {
 int proc::syscall_close(regstate* regs) {
     int fd = regs->reg_rdi;
     assert(fd >= 0 && fd < N_FILE_DESCRIPTORS);
-    spinlock_guard guard(fd_table_lock_);
+    spinlock_guard guard(tg_->fd_table_lock_);
     return close_fd(fd, guard);
 }
 
@@ -796,9 +831,9 @@ int proc::syscall_dup2(regstate* regs) {
         return E_BADF;
     }
 
-    spinlock_guard guard(fd_table_lock_);
-    file* file_to_dup = fd_table_[oldfd];
-    file* open_file = fd_table_[newfd];
+    spinlock_guard guard(tg_->fd_table_lock_);
+    file* file_to_dup = tg_->fd_table_[oldfd];
+    file* open_file = tg_->fd_table_[newfd];
     
     if (!file_to_dup) {
         return E_BADF;
@@ -811,14 +846,14 @@ int proc::syscall_dup2(regstate* regs) {
     {
         spinlock_guard ref_count_guard(file_to_dup->ref_count_lock_);
         file_to_dup->ref_count_++;
-        fd_table_[newfd] = file_to_dup;
+        tg_->fd_table_[newfd] = file_to_dup;
     }
     return newfd;
 }
 
 int proc::get_open_fd(spinlock_guard& guard) {
     for (int i = 0; i < N_FILE_DESCRIPTORS; i++) {
-        if (fd_table_[i] == nullptr) {
+        if (tg_->fd_table_[i] == nullptr) {
             return i;
         }
     }
@@ -826,7 +861,7 @@ int proc::get_open_fd(spinlock_guard& guard) {
 }
 
 int proc::assign_to_open_fd(file* f) {
-    spinlock_guard guard(fd_table_lock_);
+    spinlock_guard guard(tg_->fd_table_lock_);
     return assign_to_open_fd(f, guard);
 }
 
@@ -835,14 +870,13 @@ int proc::assign_to_open_fd(file* f, spinlock_guard& guard) {
     if (open_fd < 0) {
         return -1;
     }
-    fd_table_[open_fd] = f;
+    tg_->fd_table_[open_fd] = f;
     return open_fd;
 }
 
 int proc::syscall_mkdir(regstate* regs) {
-    int errno;
     uintptr_t pathname_ptr = regs->reg_rdi;
-    uint64_t flag = regs->reg_rsi;
+    // uint64_t flag = regs->reg_rsi;
     if (!is_valid_pathname(pathname_ptr)) {
         return E_FAULT;
     }
@@ -881,7 +915,7 @@ int proc::syscall_mkdir(regstate* regs) {
 
 int proc::syscall_rmdir(regstate* regs) {
     uintptr_t pathname_ptr = regs->reg_rdi;
-    uint64_t flag = regs->reg_rsi;
+    // uint64_t flag = regs->reg_rsi;
     if (!is_valid_pathname(pathname_ptr)) {
         return E_FAULT;
     }
@@ -927,7 +961,7 @@ int proc::syscall_rmdir(regstate* regs) {
     dirino->type = 0;
     dirino->size = 0;
     dirino->nlink = 0;
-    for (int i = 0; i < chkfs::ndirect; i++) {
+    for (size_t i = 0; i < chkfs::ndirect; i++) {
         dirino->direct[i].first = 0;
         dirino->direct[i].count = 0;
     }
@@ -978,7 +1012,7 @@ uint64_t proc::syscall_pipe(regstate* regs) {
         goto pipe_fail_free_objects;
     }
     {
-        spinlock_guard fd_table_guard(fd_table_lock_);
+        spinlock_guard fd_table_guard(tg_->fd_table_lock_);
         read_fd = assign_to_open_fd(pipe_read_file, fd_table_guard);
         write_fd = assign_to_open_fd(pipe_write_file, fd_table_guard);
         if (write_fd < 0 || read_fd < 0) {
@@ -1006,9 +1040,9 @@ uint64_t proc::syscall_pipe(regstate* regs) {
     }
 
     pipe_fail_free_fd_table: {
-        spinlock_guard fd_table_guard(fd_table_lock_);
-        if (read_fd >= 0) fd_table_[read_fd] = nullptr;
-        if (write_fd >= 0) fd_table_[write_fd] = nullptr;
+        spinlock_guard fd_table_guard(tg_->fd_table_lock_);
+        if (read_fd >= 0) tg_->fd_table_[read_fd] = nullptr;
+        if (write_fd >= 0) tg_->fd_table_[write_fd] = nullptr;
     }
 
     pipe_fail_free_objects: {
@@ -1087,7 +1121,7 @@ int proc::syscall_execv(regstate* regs) {
     uintptr_t pathname_ptr = regs->reg_rdi;
     uintptr_t argv = regs->reg_rsi;
     int argc = regs->reg_rdx;
-    size_t written = 0;
+    ssize_t written = 0;
 
     int error_code = 0;
     char* pathname;
@@ -1149,7 +1183,8 @@ int proc::syscall_execv(regstate* regs) {
         }
     }
 
-    init_user(id_, ppid_, new_pagetable);
+    tg_->init(tg_->tgid_, tg_->ppid_, new_pagetable);
+    init_user(id_, tg_);
 
     written = copy_argument_to_stack_end(reinterpret_cast<uintptr_t>(new_stack_page) + PAGESIZE, MEMSIZE_VIRTUAL, argv, argc);
     if (written < 0) {
@@ -1188,17 +1223,46 @@ int proc::syscall_execv(regstate* regs) {
 //    Handle fork system call.
 
 int proc::syscall_fork(regstate* regs) {
+    assert(tg_->tgid_ == tgid_);
+    log_printf("Calling fork on %d in %d\n", id_, tg_->tgid_);
     int error_code = 0;
+    threadgroup* child_tg;
     proc* child;
     x86_64_pagetable* child_pagetable;
+    pid_t tgid = -1;
     pid_t pid = -1;
     irqstate irqs;
+
+    child_tg = knew<threadgroup>();
+    if (child_tg == nullptr) {
+        log_printf("fork_failed: child_tg == nullptr \n");
+        error_code = E_NOMEM;
+        goto bad_fork_return;
+    }
+
+    irqs = tgtable_lock.lock();
+    for (int i = 1; i < NPROC; i++) {
+        if (tgtable[i] == nullptr) {
+            tgid = i;
+            break;
+        }
+    }
+    if (tgid >= 0) {
+        tgtable[tgid] = child_tg;
+    }
+    tgtable_lock.unlock(irqs);    
+
+    if (tgid < 0) {
+        log_printf("fork_failed: tgid < 0 \n");
+        error_code = E_AGAIN;
+        goto bad_fork_free_threadgroup;
+    }
 
     child = knew<proc>();
     if (child == nullptr) {
         log_printf("fork_failed: child == nullptr \n");
         error_code = E_NOMEM;
-        goto bad_fork_return;
+        goto bad_fork_free_tgid;
     }
 
     irqs = ptable_lock.lock();
@@ -1253,16 +1317,18 @@ int proc::syscall_fork(regstate* regs) {
         }
     }
 
-
     {
         spinlock_guard guard(process_hierarchy_lock);
-        child->init_user(pid, id_, child_pagetable);
+        child_tg->init(tgid, id_, child_pagetable);
+        child->init_user(pid, child_tg);
         children_list_.push_back(child);
     }
-    child->init_fd_table();
+    // child->init_fd_table();
+
+    assert(tg_);
 
     // copy over file descriptor table from parent
-    child->copy_fd_table_from_proc(this);
+    child_tg->copy_fd_table_from_threadgroup(tg_);
 
     // Copy parent registers into child struct proc
     memcpy(child->regs_, regs, sizeof(regstate));
@@ -1298,8 +1364,24 @@ int proc::syscall_fork(regstate* regs) {
         child = nullptr;
     }
 
+    bad_fork_free_tgid: {
+        assert(child_pagetable == nullptr);
+        assert(tgid > 0);
+        irqs = tgtable_lock.lock();
+        tgtable[tgid] = nullptr;
+        tgtable_lock.unlock(irqs);    
+        tgid = -1;
+    }
+
+    bad_fork_free_threadgroup: {
+        assert(child_tg != nullptr);
+        kfree(child_tg);
+        child_tg = nullptr; 
+    }
+
     bad_fork_return: {
         assert(child == nullptr);
+        assert(child_tg == nullptr);
     }
     
     return error_code;
@@ -1330,13 +1412,13 @@ void proc::syscall_exit(regstate* regs) {
         }
 
         {
-            spinlock_guard fd_table_guard(fd_table_lock_);
+            spinlock_guard fd_table_guard(tg_->fd_table_lock_);
             for (int i = 0; i < N_FILE_DESCRIPTORS; i++) {
-                if (fd_table_[i]) {
+                if (tg_->fd_table_[i]) {
                     close_fd(i, fd_table_guard);
                 }
             }
-        }        
+        }
 
         x86_64_pagetable* original_pagetable = pagetable_;
         kfree_all_user_mappings(original_pagetable);
@@ -1383,8 +1465,8 @@ uintptr_t proc::syscall_read(regstate* regs) {
 
     file* file = nullptr;
     {
-        spinlock_guard fd_table_guard(fd_table_lock_);
-        file = fd_table_[fd];
+        spinlock_guard fd_table_guard(tg_->fd_table_lock_);
+        file = tg_->fd_table_[fd];
     }
     if (!file) {
         return E_BADF;
@@ -1421,8 +1503,8 @@ uintptr_t proc::syscall_write(regstate* regs) {
 
     file* file = nullptr;
     {
-        spinlock_guard fd_table_guard(fd_table_lock_);
-        file = fd_table_[fd];
+        spinlock_guard fd_table_guard(tg_->fd_table_lock_);
+        file = tg_->fd_table_[fd];
     }
 
     // No need to keep holding fd_table_guard because the file will not get deleted while you're reading it (ref count will never be 0)
@@ -1452,8 +1534,8 @@ ssize_t proc::syscall_lseek(regstate* regs) {
     
     file* file = nullptr;
     {
-        spinlock_guard fd_table_guard(fd_table_lock_);
-        file = fd_table_[fd];
+        spinlock_guard fd_table_guard(tg_->fd_table_lock_);
+        file = tg_->fd_table_[fd];
     }
 
     // No need to keep holding fd_table_guard because the file will not get deleted while you're reading it (ref count will never be 0)

@@ -45,6 +45,7 @@ BOOT_OBJS = $(OBJDIR)/bootentry.o $(OBJDIR)/boot.o
 
 KERNEL_OBJS = $(OBJDIR)/k-exception.ko \
 	$(OBJDIR)/kernel.ko $(OBJDIR)/k-cpu.ko $(OBJDIR)/k-proc.ko \
+	$(OBJDIR)/k-threadgroup.ko \
 	$(OBJDIR)/k-buddyallocator.ko \
 	$(OBJDIR)/k-timingwheel.ko \
 	$(OBJDIR)/k-vfs.ko \

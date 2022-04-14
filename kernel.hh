@@ -11,6 +11,7 @@
 #error "kernel.hh should not be used by process code."
 #endif
 struct proc;
+struct threadgroup;
 struct yieldstate;
 struct proc_loader;
 struct elf_program;
@@ -41,16 +42,21 @@ struct __attribute__((aligned(4096))) proc {
     yieldstate* yields_ = nullptr;             // Process's current yield state
     std::atomic<int> pstate_ = ps_blank;       // Process state
 
-    x86_64_pagetable* pagetable_ = nullptr;    // Process's page table
+    x86_64_pagetable* pagetable_ = nullptr;    // Process's page table // TODO: should delete for multithreading
     uintptr_t recent_user_rip_ = 0;            // Most recent user-mode %rip
 #if HAVE_SANITIZERS
     int sanitizer_status_ = 0;
 #endif
 
     list_links runq_links_;
-    pid_t ppid_;
-    list_links sibling_links_;
-    list<proc, &proc::sibling_links_> children_list_;
+    pid_t ppid_; // TODO: should delete for multithreading
+    list_links sibling_links_; // TODO: should delete for multithreading
+    list<proc, &proc::sibling_links_> children_list_; // TODO: should delete for multithreading
+
+    list_links thread_links_;
+
+    pid_t tgid_;
+    threadgroup* tg_;
 
     int exit_status_;
     int resume_count_ = 0;
@@ -58,11 +64,7 @@ struct __attribute__((aligned(4096))) proc {
     wait_queue wq_;
     std::atomic<bool> interrupt_sleep_ = false;
 
-    file* fd_table_[N_FILE_DESCRIPTORS];
-    spinlock fd_table_lock_;
-
     int stack_canary_ = STACK_CANARY_VALUE;
-
 
     proc();
     NO_COPY_OR_ASSIGN(proc);
@@ -70,8 +72,11 @@ struct __attribute__((aligned(4096))) proc {
     inline bool contains(uintptr_t addr) const;
     inline bool contains(void* ptr) const;
 
-    void init_user(pid_t pid, pid_t ppid, x86_64_pagetable* pt);
-    void init_kernel(pid_t pid, pid_t ppid, void (*f)());
+    void init_user(pid_t pid, threadgroup* tg);
+    void init_kernel(pid_t pid, threadgroup* tg, void (*f)());
+
+    // void init_user(pid_t pid, pid_t ppid, x86_64_pagetable* pt);
+    // void init_kernel(pid_t pid, pid_t ppid, void (*f)());
 
     static int load(proc_loader& ld);
 
@@ -133,8 +138,6 @@ struct __attribute__((aligned(4096))) proc {
     bool is_valid_argument(uintptr_t argv, int argc);
     bool is_valid_fd(int fd);
 
-    void init_fd_table();
-
     ssize_t copy_argument_to_stack_end(uintptr_t stack_end, uintptr_t stack_end_va, uintptr_t argv_val, int argc);
 
     int waitpid(pid_t pid, int* stat, int options);
@@ -148,10 +151,37 @@ struct __attribute__((aligned(4096))) proc {
     static int load_segment(const elf_program& ph, proc_loader& ld);
 };
 
+struct __attribute__((aligned(4096))) threadgroup {
+    pid_t tgid_;
+    pid_t ppid_;
+    x86_64_pagetable* pagetable_ = nullptr;    // Process's page table
+    file* fd_table_[N_FILE_DESCRIPTORS];
+    spinlock fd_table_lock_;
+    list_links sibling_links_;
+    list<threadgroup, &threadgroup::sibling_links_> children_list_;
+
+    wait_queue process_wq_;
+
+    list<proc, &proc::thread_links_> thread_list_;
+    spinlock thread_list_lock_;
+
+    threadgroup();
+    void init(pid_t tgid, pid_t ppid, x86_64_pagetable* pt);
+    static pid_t assign_to_empty_tgid(spinlock_guard &guard, threadgroup* tg);
+    void init_fd_table();
+    void add_proc_to_thread_list(proc* p);
+    void copy_fd_table_from_threadgroup(threadgroup* tg);
+
+};
+
+#define NTHREADGROUP 16
+extern threadgroup* tgtable[NTHREADGROUP];
+extern spinlock tgtable_lock;
+extern spinlock process_hierarchy_lock;
+
 #define NPROC 16
 extern proc* ptable[NPROC];
 extern spinlock ptable_lock;
-extern spinlock process_hierarchy_lock;
 #define PROCSTACK_SIZE 4096UL
 
 
