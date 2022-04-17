@@ -82,7 +82,7 @@ void cpustate::schedule(proc* yielding_from) {
     assert(spinlock_depth_ == 0);  // no spinlocks are held
 
     // Exited processes (pstate_ == ps_blank)
-    if (yielding_from->pstate_ == 0) {
+    if (yielding_from->pstate_ == proc::ps_blank) {
         kfree(yielding_from);
     }
 
@@ -146,4 +146,5 @@ void cpustate::init_idle_task() {
     idle_task_tg->init(-1, -1, early_pagetable);
     idle_task_ = knew<proc>();
     idle_task_->init_kernel(-1, idle_task_tg, idle);
+    idle_task_tg->add_proc_to_thread_list(idle_task_);
 }

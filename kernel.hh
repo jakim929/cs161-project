@@ -49,9 +49,9 @@ struct __attribute__((aligned(4096))) proc {
 #endif
 
     list_links runq_links_;
-    pid_t ppid_; // TODO: should delete for multithreading
-    list_links sibling_links_; // TODO: should delete for multithreading
-    list<proc, &proc::sibling_links_> children_list_; // TODO: should delete for multithreading
+    // pid_t ppid_; // TODO: should delete for multithreading
+    // list_links sibling_links_; // TODO: should delete for multithreading
+    // list<proc, &proc::sibling_links_> children_list_; // TODO: should delete for multithreading
 
     list_links thread_links_;
 
@@ -62,7 +62,6 @@ struct __attribute__((aligned(4096))) proc {
     int resume_count_ = 0;
     int home_cpuindex_;
     wait_queue wq_;
-    std::atomic<bool> interrupt_sleep_ = false;
 
     int stack_canary_ = STACK_CANARY_VALUE;
 
@@ -98,6 +97,8 @@ struct __attribute__((aligned(4096))) proc {
     int syscall_fork(regstate* regs);
     void syscall_exit(regstate* regs);
 
+    void syscall_texit(regstate* regs);
+
     int syscall_waitpid(regstate* regs);
 
     int syscall_msleep(regstate* regs);
@@ -130,9 +131,6 @@ struct __attribute__((aligned(4096))) proc {
 
     void copy_fd_table_from_proc(proc* source);
 
-    proc* get_child(pid_t pid);
-    proc* get_any_exited_child();
-
     bool is_valid_string(char* str, size_t max_char);
     bool is_valid_pathname(uintptr_t pathname);
     bool is_valid_argument(uintptr_t argv, int argc);
@@ -162,6 +160,11 @@ struct __attribute__((aligned(4096))) threadgroup {
 
     wait_queue process_wq_;
 
+    int process_exit_status_;
+    std::atomic<bool> is_exited_ = false;
+
+    std::atomic<bool> interrupt_sleep_ = false;
+
     list<proc, &proc::thread_links_> thread_list_;
     spinlock thread_list_lock_;
 
@@ -171,6 +174,15 @@ struct __attribute__((aligned(4096))) threadgroup {
     void init_fd_table();
     void add_proc_to_thread_list(proc* p);
     void copy_fd_table_from_threadgroup(threadgroup* tg);
+
+    threadgroup* get_child(pid_t tgid, spinlock_guard &process_hierarchy_lock);
+    threadgroup* get_any_exited_child(spinlock_guard &process_hierarchy_lock);
+
+    int waitpid(pid_t tgid, int* stat, int options);
+    void exit(int status);
+    void exit_cleanup(int status);
+    
+    bool is_exited(spinlock_guard &guard);
 
 };
 
@@ -401,6 +413,7 @@ inline T read_unaligned(const uint8_t* ptr, T (U::* member)) {
 }
 
 extern timingwheel timer_queue;
+extern spinlock timer_lock;
 
 #define TIMING_WHEEL_QUEUE_COUNT 64
 

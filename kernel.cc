@@ -144,7 +144,7 @@ void init_process_start(pid_t tgid, pid_t pid, pid_t ppid) {
         assert(!tgtable[tgid]);
         tgtable[tgid] = tg;
     }
-
+    tg->add_proc_to_thread_list(p);
 
     cpus[pid % ncpu].enqueue(p);
 }
@@ -153,6 +153,7 @@ void issue_prefetch_process_start(pid_t tgid, pid_t pid, pid_t ppid) {
     threadgroup* tg = knew<threadgroup>();
     tg->init(tgid, ppid, early_pagetable);
     proc* p = knew<proc>();
+    tg->add_proc_to_thread_list(p);
     p->init_kernel(pid, tg, &issue_prefetch_process_fn);
     {
         spinlock_guard guard(ptable_lock);
@@ -164,15 +165,6 @@ void issue_prefetch_process_start(pid_t tgid, pid_t pid, pid_t ppid) {
         assert(!tgtable[tgid]);
         tgtable[tgid] = tg;
     }
-
-
-    // for (int i = 0; i < N_FILE_DESCRIPTORS; i++) {
-    //     p->fd_table_[i] = nullptr;
-    // }
-
-    // p->fd_table_[0] = open_file_table[0];
-    // p->fd_table_[1] = open_file_table[0];
-    // p->fd_table_[2] = open_file_table[0];
 
     cpus[pid % ncpu].enqueue(p);
 }
@@ -223,9 +215,10 @@ void boot_process_start(pid_t tgid, pid_t pid, pid_t ppid, const char* name) {
         assert(!tgtable[tgid]);
         tgtable[tgid] = tg;
     }
+    tg->add_proc_to_thread_list(p);
     {
         spinlock_guard guard(process_hierarchy_lock);
-        ptable[1]->children_list_.push_back(p);
+        tgtable[1]->children_list_.push_back(tg);
     }
 
     // add to run queue
@@ -335,12 +328,12 @@ uintptr_t proc::run_syscall(regstate* regs) {
         break;                  // will not be reached
 
     case SYSCALL_GETPID:
-        return id_;
+        return tgid_;
 
     case SYSCALL_GETPPID: {
         spinlock_guard guard(process_hierarchy_lock);
-        log_printf("SYSCALL_GETPPID for process %d => %d\n", id_, ppid_);
-        return ppid_;
+        log_printf("SYSCALL_GETPPID for process %d => %d\n", id_, tg_->ppid_);
+        return tg_->ppid_;
     }
 
     case SYSCALL_YIELD:
@@ -372,6 +365,11 @@ uintptr_t proc::run_syscall(regstate* regs) {
         // should never reach
         assert(false);
     }
+
+    case SYSCALL_TEXIT:
+        syscall_texit(regs);
+        // should never reach
+        assert(false);
 
     case SYSCALL_FORK:
         // return 0;
@@ -420,6 +418,9 @@ uintptr_t proc::run_syscall(regstate* regs) {
         }
         return 0;
     }
+
+    case SYSCALL_GETTID:
+        return id_;
 
     case SYSCALL_MSLEEP:    
         return syscall_msleep(regs);
@@ -520,105 +521,134 @@ int proc::syscall_testfree(uintptr_t heap_top, uintptr_t stack_bottom) {
 int proc::syscall_msleep(regstate* regs) {
     uint64_t end_time = (uint64_t) ticks.load() + (regs->reg_rdi + 9) / 10;
     spinlock_guard guard(timer_lock);
-    interrupt_sleep_ = false;
+    tg_->interrupt_sleep_ = false;
     waiter().block_until(*timer_queue.get_wq_for_time(end_time), [&] () {
         // this is called with `x_lock` held
-        if (interrupt_sleep_) {
+        if (tg_->interrupt_sleep_) {
             log_printf("ABOUT TO INTERRUPT!\n");
         }
-        return long(end_time - ticks.load()) <= 0 || interrupt_sleep_;
+        return long(end_time - ticks.load()) <= 0 || tg_->interrupt_sleep_.load();
     }, guard);
-    if (interrupt_sleep_) {
+    if (tg_->interrupt_sleep_) {
         return E_INTR;
     }
 
     return 0;
 }
 
-// Assumes process_hierarchy_lock is locked
-proc* proc::get_child(pid_t pid) {
-    proc* child = nullptr;
-    for (proc* p = children_list_.front(); p; p = children_list_.next(p)) {
-        if (p->id_ == pid) {
-            child = p;
-            break;
-        }
+void proc::syscall_texit(regstate* regs) {
+    int status = regs->reg_rdi;
+    bool has_next_thread = false;
+    bool has_prev_thread = false;
+    bool is_last_thread = false;
+    {
+        spinlock_guard ptable_guard(ptable_lock);
+        spinlock_guard thread_list_guard(tg_->thread_list_lock_);
+        has_next_thread = tg_->thread_list_.next(this) != nullptr;
+        has_prev_thread = tg_->thread_list_.prev(this) != nullptr;
+        log_printf("has_next: %d, has_prev: %d\n", has_next_thread, has_prev_thread);
+        is_last_thread = !has_next_thread && !has_prev_thread;    
+        thread_links_.erase();
+        // cpustate::schedule will free proc with pstate_ = ps_blank
+        pstate_ = ps_blank;
+        ptable[id_] = nullptr;
     }
-    return child;
+
+    // TODO remove: Temporary asertion when clone isn't implemented yet
+    assert(tg_->thread_list_.empty());
+
+    if (is_last_thread) {
+        log_printf("islastthread for pid[%d] tgid[%d]\n", id_, tgid_);
+        tg_->exit_cleanup(status);
+    }
+    yield_noreturn();
 }
 
-// Assumes process_hierarchy_lock is locked
-proc* proc::get_any_exited_child() {
-    proc* child = nullptr;
-    for (proc* p = children_list_.front(); p; p = children_list_.next(p)) {
-        if (p->pstate_ == ps_exited) {
-            child = p;
-            break;
-        }
-    }
-    return child;
-}
+// // Assumes process_hierarchy_lock is locked
+// proc* proc::get_child(pid_t pid) {
+//     proc* child = nullptr;
+//     for (proc* p = children_list_.front(); p; p = children_list_.next(p)) {
+//         if (p->id_ == pid) {
+//             child = p;
+//             break;
+//         }
+//     }
+//     return child;
+// }
 
-int proc::waitpid(pid_t pid, int* stat, int options) {
-    proc* wait_child = nullptr;
-    if (pid != 0) {
-        spinlock_guard guard(process_hierarchy_lock);
-        wait_child = get_child(pid);
-        if (!wait_child) {
-            return E_CHILD;
-        }
-        if (wait_child->pstate_ != ps_exited) {
-            if (options == W_NOHANG) {
-                return E_AGAIN;
-            } else {
-                waiter().block_until(wq_, [&] () {
-                    return wait_child->pstate_ == ps_exited;
-                }, guard);
-            }
-        }
-        wait_child->sibling_links_.erase();
+// // Assumes process_hierarchy_lock is locked
+// proc* proc::get_any_exited_child() {
+//     proc* child = nullptr;
+//     for (proc* p = children_list_.front(); p; p = children_list_.next(p)) {
+//         if (p->pstate_ == ps_exited) {
+//             child = p;
+//             break;
+//         }
+//     }
+//     return child;
+// }
 
-    } else {
-        spinlock_guard guard(process_hierarchy_lock);
-        if (children_list_.empty()) {
-            return E_CHILD;
-        }
-        wait_child = get_any_exited_child();
-        if (!wait_child) {
-            if (options == W_NOHANG) {
-                return E_AGAIN;
-            } else {
-                waiter().block_until(wq_, [&] () {
-                    for (proc* child = children_list_.front(); child; child = children_list_.next(child)) {
-                        if (child->pstate_ == ps_exited) {
-                            wait_child = child;
-                            break;
-                        }
-                    }
-                    return !!wait_child;
-                }, guard);
-            }
-        }
-        wait_child->sibling_links_.erase();
-    }
-    pid_t freed_pid = wait_child->id_;
-    pid_t freed_tgid = wait_child->tg_->tgid_;
-    if (stat != nullptr) {
-        *stat = wait_child->exit_status_;
-    }
-    {
-        spinlock_guard guard(ptable_lock);
-        ptable[freed_pid] = nullptr;
-    }
-    {
-        spinlock_guard guard(tgtable_lock);
-        tgtable[freed_tgid] = nullptr;
-    }
-    total_resume_count += wait_child->resume_count_;
-    log_printf("proc [%d] resume count: %d total: %d\n", freed_pid, wait_child->resume_count_, total_resume_count);
-    kfree(wait_child->tg_);
-    kfree(wait_child);
-    return freed_pid;
+int proc::waitpid(pid_t tgid, int* stat, int options) {
+    return tg_->waitpid(tgid, stat, options);
+    // proc* wait_child = nullptr;
+    // if (tgid != 0) {
+    //     spinlock_guard guard(process_hierarchy_lock);
+    //     wait_child = get_child(pid);
+    //     if (!wait_child) {
+    //         return E_CHILD;
+    //     }
+    //     if (wait_child->pstate_ != ps_exited) {
+    //         if (options == W_NOHANG) {
+    //             return E_AGAIN;
+    //         } else {
+    //             waiter().block_until(wq_, [&] () {
+    //                 return wait_child->pstate_ == ps_exited;
+    //             }, guard);
+    //         }
+    //     }
+    //     wait_child->sibling_links_.erase();
+
+    // } else {
+    //     spinlock_guard guard(process_hierarchy_lock);
+    //     if (children_list_.empty()) {
+    //         return E_CHILD;
+    //     }
+    //     wait_child = get_any_exited_child();
+    //     if (!wait_child) {
+    //         if (options == W_NOHANG) {
+    //             return E_AGAIN;
+    //         } else {
+    //             waiter().block_until(wq_, [&] () {
+    //                 for (proc* child = children_list_.front(); child; child = children_list_.next(child)) {
+    //                     if (child->pstate_ == ps_exited) {
+    //                         wait_child = child;
+    //                         break;
+    //                     }
+    //                 }
+    //                 return !!wait_child;
+    //             }, guard);
+    //         }
+    //     }
+    //     wait_child->sibling_links_.erase();
+    // }
+    // pid_t freed_pid = wait_child->id_;
+    // pid_t freed_tgid = wait_child->tg_->tgid_;
+    // if (stat != nullptr) {
+    //     *stat = wait_child->exit_status_;
+    // }
+    // {
+    //     spinlock_guard guard(ptable_lock);
+    //     ptable[freed_pid] = nullptr;
+    // }
+    // {
+    //     spinlock_guard guard(tgtable_lock);
+    //     tgtable[freed_tgid] = nullptr;
+    // }
+    // total_resume_count += wait_child->resume_count_;
+    // log_printf("proc [%d] resume count: %d total: %d\n", freed_pid, wait_child->resume_count_, total_resume_count);
+    // kfree(wait_child->tg_);
+    // kfree(wait_child);
+    // return freed_pid;
 }
 
 int proc::syscall_waitpid(regstate* regs) {
@@ -1184,6 +1214,7 @@ int proc::syscall_execv(regstate* regs) {
     }
 
     tg_->init(tg_->tgid_, tg_->ppid_, new_pagetable);
+    tg_->copy_fd_table_from_threadgroup(tgtable[1]);
     init_user(id_, tg_);
 
     written = copy_argument_to_stack_end(reinterpret_cast<uintptr_t>(new_stack_page) + PAGESIZE, MEMSIZE_VIRTUAL, argv, argc);
@@ -1216,6 +1247,7 @@ int proc::syscall_execv(regstate* regs) {
     bad_execv_return: {
 
     }
+    log_printf("FAILING!!\n");
     return error_code;
 }
 
@@ -1239,7 +1271,6 @@ int proc::syscall_fork(regstate* regs) {
         error_code = E_NOMEM;
         goto bad_fork_return;
     }
-
     irqs = tgtable_lock.lock();
     for (int i = 1; i < NPROC; i++) {
         if (tgtable[i] == nullptr) {
@@ -1319,16 +1350,17 @@ int proc::syscall_fork(regstate* regs) {
 
     {
         spinlock_guard guard(process_hierarchy_lock);
-        child_tg->init(tgid, id_, child_pagetable);
+        child_tg->init(tgid, tgid_, child_pagetable);
         child->init_user(pid, child_tg);
-        children_list_.push_back(child);
+        tg_->children_list_.push_back(child_tg);
     }
-    // child->init_fd_table();
 
     assert(tg_);
 
     // copy over file descriptor table from parent
     child_tg->copy_fd_table_from_threadgroup(tg_);
+
+    child_tg->add_proc_to_thread_list(child);
 
     // Copy parent registers into child struct proc
     memcpy(child->regs_, regs, sizeof(regstate));
@@ -1389,52 +1421,54 @@ int proc::syscall_fork(regstate* regs) {
 
 void proc::syscall_exit(regstate* regs) {
     exit_status_ = (int) regs->reg_rdi;
+    log_printf("EXITING syscall_exit for tgid:%d\n", tgid_);
+    syscall_texit(regs);
 
-    proc* parent = nullptr;
-    // Remove current process from process table
-    {
-        auto irqs = ptable_lock.lock();
-        // ptable[id_] = nullptr;
-        parent = ptable[ppid_];
-        ptable_lock.unlock(irqs);
-        spinlock_guard guard(process_hierarchy_lock);
+    // proc* parent = nullptr;
+    // // Remove current process from process table
+    // {
+    //     auto irqs = ptable_lock.lock();
+    //     // ptable[id_] = nullptr;
+    //     parent = ptable[tg_->ppid_];
+    //     ptable_lock.unlock(irqs);
+    //     spinlock_guard guard(process_hierarchy_lock);
 
-        log_printf("exiting process %d\n", id_);
+    //     log_printf("exiting process %d\n", id_);
 
-        proc* child = children_list_.pop_front();
-        while (child) {
-            log_printf("iter start %d\n", child->id_);
-            child->ppid_ = 1;
-            ptable[1]->children_list_.push_back(child);
+    //     threadgroup* child = tg_->children_list_.pop_front();
+    //     while (child) {
+    //         log_printf("iter start %d\n", child->tgid_);
+    //         child->ppid_ = 1;
+    //         tgtable[1]->children_list_.push_back(child);
 
-            log_printf("proc[%d] reassigned %d to parent\n", id_, child->id_);
-            child = children_list_.pop_front();
-        }
+    //         log_printf("proc[%d] reassigned %d to parent\n", id_, child->tgid_);
+    //         child = tg_->children_list_.pop_front();
+    //     }
 
-        {
-            spinlock_guard fd_table_guard(tg_->fd_table_lock_);
-            for (int i = 0; i < N_FILE_DESCRIPTORS; i++) {
-                if (tg_->fd_table_[i]) {
-                    close_fd(i, fd_table_guard);
-                }
-            }
-        }
+    //     {
+    //         spinlock_guard fd_table_guard(tg_->fd_table_lock_);
+    //         for (int i = 0; i < N_FILE_DESCRIPTORS; i++) {
+    //             if (tg_->fd_table_[i]) {
+    //                 close_fd(i, fd_table_guard);
+    //             }
+    //         }
+    //     }
 
-        x86_64_pagetable* original_pagetable = pagetable_;
-        kfree_all_user_mappings(original_pagetable);
-        set_pagetable(early_pagetable);
-        kfree_pagetable(original_pagetable);
-        pagetable_ = early_pagetable;
-        pstate_ = ps_exited;
-        parent->wq_.wake_all();
-        {
-            spinlock_guard timer_guard(timer_lock);
-            parent->interrupt_sleep_ = true;
-            timer_queue.wake_all();
-        }
-    }
+    //     x86_64_pagetable* original_pagetable = pagetable_;
+    //     kfree_all_user_mappings(original_pagetable);
+    //     set_pagetable(early_pagetable);
+    //     kfree_pagetable(original_pagetable);
+    //     pagetable_ = early_pagetable;
+    //     pstate_ = ps_exited;
+    //     parent->wq_.wake_all();
+    //     // {
+    //     //     spinlock_guard timer_guard(timer_lock);
+    //     //     parent->interrupt_sleep_ = true;
+    //     //     timer_queue.wake_all();
+    //     // }
+    // }
 
-    yield_noreturn();
+    // yield_noreturn();
 }
 
 
