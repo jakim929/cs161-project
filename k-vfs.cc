@@ -169,7 +169,7 @@ ssize_t pipe::read(char* buf, size_t sz) {
       blen_--;
       read++;
     }
-    assert(!write_open_ || read > 0);
+    assert(!write_open_ || read > 0 || current()->tg_->should_exit_);
     wq_.wake_all();
     return read;
 }

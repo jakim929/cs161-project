@@ -25,7 +25,6 @@ void proc::init_user(pid_t pid, threadgroup* tg) {
     assert(!(reinterpret_cast<uintptr_t>(tg->pagetable_) & PAGEOFFMASK));
     assert(tg->pagetable_->entry[256] == early_pagetable->entry[256]);
     assert(tg->pagetable_->entry[511] == early_pagetable->entry[511]);
-    log_printf("creating user process %d from %d for thread_group %d\n", pid, tg->ppid_, tg->tgid_);
 
     id_ = pid;
     tgid_ = tg->tgid_;

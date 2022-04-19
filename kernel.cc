@@ -370,6 +370,9 @@ uintptr_t proc::run_syscall(regstate* regs) {
         syscall_texit(regs);
         // should never reach
         assert(false);
+    
+    case SYSCALL_CLONE:
+        return syscall_clone(regs);
 
     case SYSCALL_FORK:
         // return 0;
@@ -475,31 +478,10 @@ int proc::syscall_nastyalloc(int n) {
     for (int i = 0; i < 800; i++) {
         test[i] = i;
     }
-    // Recursive method
-    // if (n == 0) {
-    //     return n;
-    // }
-    // syscall_nastyalloc(n - 1);
     return test[4];
 }
 
 int proc::syscall_testkalloc(uintptr_t heap_top, uintptr_t stack_bottom, int mode) {
-    // assert(allocator.max_order_allocable(20480, 1000000) == 12);
-    // assert(allocator.max_order_allocable(20480, 1000000) == 12);
-    // assert(allocator.max_order_allocable(20480, 20480 + 4096) == 12);
-    // assert(allocator.max_order_allocable(24576, 1000000) == 13);
-    // assert(allocator.max_order_allocable(24576, 24576 + 8192) == 13); 
-    // assert(allocator.max_order_allocable(24576, 24576 + 4096) == 12);
-    // assert(allocator.max_order_allocable(24576, 24576 + 1024) == 12);
-
-    // assert(allocator.get_desired_order(4095) == 12);
-    // assert(allocator.get_desired_order(4096) == 12);
-    // assert(allocator.get_desired_order(4097) == 13);
-    // assert(allocator.get_desired_order(15360) == 14);
-    // assert(allocator.get_desired_order(1028) == 12);
-    // assert(allocator.get_desired_order(1 << 20) == 20);
-    // assert(allocator.get_desired_order((1 << 20) + 1) == 21);
-    // assert(allocator.get_desired_order((1 << 20) - 1) == 20);
     void* pg = kalloc(PAGESIZE);
     if (pg == nullptr || vmiter(this, heap_top).try_map(ka2pa(pg), PTE_PWU) < 0) {
         return 0;
@@ -523,7 +505,6 @@ int proc::syscall_msleep(regstate* regs) {
     spinlock_guard guard(timer_lock);
     tg_->interrupt_sleep_ = false;
     waiter().block_until(*timer_queue.get_wq_for_time(end_time), [&] () {
-        // this is called with `x_lock` held
         if (tg_->interrupt_sleep_) {
             log_printf("ABOUT TO INTERRUPT!\n");
         }
@@ -536,8 +517,45 @@ int proc::syscall_msleep(regstate* regs) {
     return 0;
 }
 
+int proc::syscall_clone(regstate* regs) {
+    uintptr_t stack_top = regs->reg_rdi;
+
+    spinlock_guard guard(tg_->thread_list_lock_);
+    proc* cloned_thread = nullptr;
+    irqstate irqs;
+    pid_t pid = -1;
+    cloned_thread = knew<proc>();
+    tg_->thread_list_.push_back(cloned_thread);
+    irqs = ptable_lock.lock();
+    for (int i = 1; i < NPROC; i++) {
+        if (ptable[i] == nullptr) {
+            pid = i;
+            break;
+        }
+    }
+    if (pid >= 0) {
+        ptable[pid] = cloned_thread;
+    }
+    ptable_lock.unlock(irqs);
+    if (pid < 0) {
+        kfree(cloned_thread);
+        return E_AGAIN;
+    }
+
+    cloned_thread->init_user(pid, tg_);
+    cloned_thread->regs_->reg_rip = regs->reg_rip;
+    cloned_thread->regs_->reg_rsp = stack_top;
+
+    cloned_thread->regs_->reg_rax = 0;
+    cpus[pid % ncpu].enqueue(cloned_thread);
+    return pid;
+}
+
 void proc::syscall_texit(regstate* regs) {
     int status = regs->reg_rdi;
+    int return_val = regs->reg_rax;
+    log_printf("syscall_texit[%d / %d] for pid[%d] tgid[%d]\n", status, return_val, id_, tgid_);
+
     bool has_next_thread = false;
     bool has_prev_thread = false;
     bool is_last_thread = false;
@@ -546,7 +564,6 @@ void proc::syscall_texit(regstate* regs) {
         spinlock_guard thread_list_guard(tg_->thread_list_lock_);
         has_next_thread = tg_->thread_list_.next(this) != nullptr;
         has_prev_thread = tg_->thread_list_.prev(this) != nullptr;
-        log_printf("has_next: %d, has_prev: %d\n", has_next_thread, has_prev_thread);
         is_last_thread = !has_next_thread && !has_prev_thread;    
         thread_links_.erase();
         // cpustate::schedule will free proc with pstate_ = ps_blank
@@ -554,101 +571,15 @@ void proc::syscall_texit(regstate* regs) {
         ptable[id_] = nullptr;
     }
 
-    // TODO remove: Temporary asertion when clone isn't implemented yet
-    assert(tg_->thread_list_.empty());
-
     if (is_last_thread) {
-        log_printf("islastthread for pid[%d] tgid[%d]\n", id_, tgid_);
+        log_printf("is_last_thread for pid[%d] tgid[%d]\n", id_, tgid_);
         tg_->exit_cleanup(status);
     }
     yield_noreturn();
 }
 
-// // Assumes process_hierarchy_lock is locked
-// proc* proc::get_child(pid_t pid) {
-//     proc* child = nullptr;
-//     for (proc* p = children_list_.front(); p; p = children_list_.next(p)) {
-//         if (p->id_ == pid) {
-//             child = p;
-//             break;
-//         }
-//     }
-//     return child;
-// }
-
-// // Assumes process_hierarchy_lock is locked
-// proc* proc::get_any_exited_child() {
-//     proc* child = nullptr;
-//     for (proc* p = children_list_.front(); p; p = children_list_.next(p)) {
-//         if (p->pstate_ == ps_exited) {
-//             child = p;
-//             break;
-//         }
-//     }
-//     return child;
-// }
-
 int proc::waitpid(pid_t tgid, int* stat, int options) {
     return tg_->waitpid(tgid, stat, options);
-    // proc* wait_child = nullptr;
-    // if (tgid != 0) {
-    //     spinlock_guard guard(process_hierarchy_lock);
-    //     wait_child = get_child(pid);
-    //     if (!wait_child) {
-    //         return E_CHILD;
-    //     }
-    //     if (wait_child->pstate_ != ps_exited) {
-    //         if (options == W_NOHANG) {
-    //             return E_AGAIN;
-    //         } else {
-    //             waiter().block_until(wq_, [&] () {
-    //                 return wait_child->pstate_ == ps_exited;
-    //             }, guard);
-    //         }
-    //     }
-    //     wait_child->sibling_links_.erase();
-
-    // } else {
-    //     spinlock_guard guard(process_hierarchy_lock);
-    //     if (children_list_.empty()) {
-    //         return E_CHILD;
-    //     }
-    //     wait_child = get_any_exited_child();
-    //     if (!wait_child) {
-    //         if (options == W_NOHANG) {
-    //             return E_AGAIN;
-    //         } else {
-    //             waiter().block_until(wq_, [&] () {
-    //                 for (proc* child = children_list_.front(); child; child = children_list_.next(child)) {
-    //                     if (child->pstate_ == ps_exited) {
-    //                         wait_child = child;
-    //                         break;
-    //                     }
-    //                 }
-    //                 return !!wait_child;
-    //             }, guard);
-    //         }
-    //     }
-    //     wait_child->sibling_links_.erase();
-    // }
-    // pid_t freed_pid = wait_child->id_;
-    // pid_t freed_tgid = wait_child->tg_->tgid_;
-    // if (stat != nullptr) {
-    //     *stat = wait_child->exit_status_;
-    // }
-    // {
-    //     spinlock_guard guard(ptable_lock);
-    //     ptable[freed_pid] = nullptr;
-    // }
-    // {
-    //     spinlock_guard guard(tgtable_lock);
-    //     tgtable[freed_tgid] = nullptr;
-    // }
-    // total_resume_count += wait_child->resume_count_;
-    // log_printf("proc [%d] resume count: %d total: %d\n", freed_pid, wait_child->resume_count_, total_resume_count);
-    // kfree(wait_child->tg_);
-    // kfree(wait_child);
-    // return freed_pid;
 }
 
 int proc::syscall_waitpid(regstate* regs) {
@@ -1258,7 +1189,7 @@ int proc::syscall_fork(regstate* regs) {
     assert(tg_->tgid_ == tgid_);
     log_printf("Calling fork on %d in %d\n", id_, tg_->tgid_);
     int error_code = 0;
-    threadgroup* child_tg;
+    threadgroup* child_tg = nullptr;
     proc* child;
     x86_64_pagetable* child_pagetable;
     pid_t tgid = -1;
@@ -1421,7 +1352,9 @@ int proc::syscall_fork(regstate* regs) {
 
 void proc::syscall_exit(regstate* regs) {
     exit_status_ = (int) regs->reg_rdi;
-    log_printf("EXITING syscall_exit for tgid:%d\n", tgid_);
+    log_printf("EXITING syscall_exit status [%d] for tgid[%d] pid[%d]\n", regs->reg_rdi, tgid_, id_);
+    tg_->should_exit_ = true;
+    tg_->process_exit_status_ = exit_status_;
     syscall_texit(regs);
 
     // proc* parent = nullptr;

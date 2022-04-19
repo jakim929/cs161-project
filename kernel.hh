@@ -98,6 +98,7 @@ struct __attribute__((aligned(4096))) proc {
     void syscall_exit(regstate* regs);
 
     void syscall_texit(regstate* regs);
+    int syscall_clone(regstate* regs);
 
     int syscall_waitpid(regstate* regs);
 
@@ -164,6 +165,7 @@ struct __attribute__((aligned(4096))) threadgroup {
     std::atomic<bool> is_exited_ = false;
 
     std::atomic<bool> interrupt_sleep_ = false;
+    std::atomic<bool> should_exit_ = false;
 
     list<proc, &proc::thread_links_> thread_list_;
     spinlock thread_list_lock_;

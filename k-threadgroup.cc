@@ -62,8 +62,6 @@ void threadgroup::exit_cleanup(int status) {
     spinlock_guard guard(thread_list_lock_);
     assert(thread_list_.front() == nullptr);
   }
-
-
   {
     spinlock_guard guard(process_hierarchy_lock);
     spinlock_guard tgtable_guard(tgtable_lock);

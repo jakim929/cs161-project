@@ -57,7 +57,7 @@ KERNEL_OBJS = $(OBJDIR)/k-exception.ko \
 
 PROCESSES ?= $(patsubst %.cc,%,$(wildcard p-*.cc))
 
-PROCESS_LIB_OBJS = $(OBJDIR)/lib.uo $(OBJDIR)/u-lib.uo $(OBJDIR)/crc32c.uo
+PROCESS_LIB_OBJS = $(OBJDIR)/lib.uo $(OBJDIR)/u-lib.uo $(OBJDIR)/crc32c.uo $(OBJDIR)/u-clone.uo
 
 INITFS_CONTENTS = \
 	$(shell find initfs -type f -not -name '\#*\#' -not -name '*~' 2>/dev/null) \
