@@ -546,20 +546,22 @@ int proc::syscall_clone(regstate* regs) {
     cloned_thread->regs_->reg_rip = regs->reg_rip;
     cloned_thread->regs_->reg_rsp = stack_top;
 
+    log_printf("sys_clone pid[%d] tgid[%d] cloned to pid[%d] tgid[%d] with stack_page %p\n", id_, tgid_, cloned_thread->id_, cloned_thread->tgid_, stack_top);
+
     cloned_thread->regs_->reg_rax = 0;
     cpus[pid % ncpu].enqueue(cloned_thread);
     return pid;
 }
 
-void proc::syscall_texit(regstate* regs) {
-    int status = regs->reg_rdi;
-    int return_val = regs->reg_rax;
-    log_printf("syscall_texit[%d / %d] for pid[%d] tgid[%d]\n", status, return_val, id_, tgid_);
+void proc::texit(int status) {
+ log_printf("syscall_texit[%d] for pid[%d] tgid[%d]\n", status, id_, tgid_);
 
     bool has_next_thread = false;
     bool has_prev_thread = false;
     bool is_last_thread = false;
     {
+
+        // TODO: Move the ptable_lock outside so 
         spinlock_guard ptable_guard(ptable_lock);
         spinlock_guard thread_list_guard(tg_->thread_list_lock_);
         has_next_thread = tg_->thread_list_.next(this) != nullptr;
@@ -576,6 +578,11 @@ void proc::syscall_texit(regstate* regs) {
         tg_->exit_cleanup(status);
     }
     yield_noreturn();
+}
+
+void proc::syscall_texit(regstate* regs) {
+    int status = regs->reg_rdi;
+    texit(status);
 }
 
 int proc::waitpid(pid_t tgid, int* stat, int options) {
@@ -596,7 +603,7 @@ int proc::close_fd(int fd, spinlock_guard& guard) {
         return E_BADF;
     }
 
-    log_printf("CLOSING fd %d\n", fd);
+    // log_printf("CLOSING fd %d\n", fd);
 
     tg_->fd_table_[fd] = nullptr;
     {
@@ -1355,6 +1362,15 @@ void proc::syscall_exit(regstate* regs) {
     log_printf("EXITING syscall_exit status [%d] for tgid[%d] pid[%d]\n", regs->reg_rdi, tgid_, id_);
     tg_->should_exit_ = true;
     tg_->process_exit_status_ = exit_status_;
+    {
+        spinlock_guard guard(tg_->thread_list_lock_);
+        for (proc* thread = tg_->thread_list_.front(); thread; thread = tg_->thread_list_.next(thread)) {
+            if (thread != this) {
+                thread->wake();
+            }
+        }
+
+    }
     syscall_texit(regs);
 
     // proc* parent = nullptr;
@@ -1416,6 +1432,8 @@ uintptr_t proc::syscall_read(regstate* regs) {
     int fd = regs->reg_rdi;
     uintptr_t addr = regs->reg_rsi;
     size_t sz = regs->reg_rdx;
+
+    log_printf("syscall_read fd[%d] pid[%d] tgid[%d]\n", fd, id_, tgid_);
 
     // Your code here!
     // * Read from open file `fd` (reg_rdi), rather than `keyboardstate`.

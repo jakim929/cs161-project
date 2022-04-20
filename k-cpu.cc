@@ -119,13 +119,12 @@ void cpustate::schedule(proc* yielding_from) {
         // no need to skip `current_` if no other runnable procs
         yielding_from = nullptr;
     }
-
     // run `current_`
     set_pagetable(current_->pagetable_);
     if (current_->tg_->should_exit_) {
         log_printf("HELLO! exiting early pid[%d] tgid[%d] %d\n", current_->id_, current_->tgid_, current_->tg_->process_exit_status_);
-        current_->regs_->reg_rdi = current_->tg_->process_exit_status_;
-        current_->syscall_texit(current_->regs_);
+        current_->texit(current_->tg_->process_exit_status_);
+
     }
     current_->resume_count_++;
     current_->resume(); // does not return

@@ -49,9 +49,6 @@ struct __attribute__((aligned(4096))) proc {
 #endif
 
     list_links runq_links_;
-    // pid_t ppid_; // TODO: should delete for multithreading
-    // list_links sibling_links_; // TODO: should delete for multithreading
-    // list<proc, &proc::sibling_links_> children_list_; // TODO: should delete for multithreading
 
     list_links thread_links_;
 
@@ -140,6 +137,7 @@ struct __attribute__((aligned(4096))) proc {
     ssize_t copy_argument_to_stack_end(uintptr_t stack_end, uintptr_t stack_end_va, uintptr_t argv_val, int argc);
 
     int waitpid(pid_t pid, int* stat, int options);
+    void texit(int status);
 
     void wake();
 

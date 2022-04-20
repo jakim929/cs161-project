@@ -170,6 +170,7 @@ ssize_t pipe::read(char* buf, size_t sz) {
       read++;
     }
     assert(!write_open_ || read > 0 || current()->tg_->should_exit_);
+    log_printf("WAKING from READ id_[%d] tgid_[%d] \n", current()->id_,current()->tg_->tgid_);
     wq_.wake_all();
     return read;
 }
@@ -190,6 +191,7 @@ ssize_t pipe::write(char* buf, size_t sz) {
         blen_++;
         written++;
     }
+    log_printf("WAKING from WRITE\n");
     assert(written > 0);
     wq_.wake_all();
     return written;
@@ -198,6 +200,8 @@ ssize_t pipe::write(char* buf, size_t sz) {
 void pipe::close_read() {
     spinlock_guard guard(lock_);
     read_open_ = false;
+        log_printf("WAKING from close_read id_[%d] tgid_[%d] \n", current()->id_,current()->tg_->tgid_);
+
     wq_.wake_all();
     return;
 }
@@ -205,6 +209,8 @@ void pipe::close_read() {
 void pipe::close_write() {
     spinlock_guard guard(lock_);
     write_open_ = false;
+            log_printf("WAKING from close_write id_[%d] tgid_[%d] \n", current()->id_,current()->tg_->tgid_);
+
     wq_.wake_all();
     return;
 }

@@ -228,6 +228,7 @@ int proc::load_segment(const elf_program& ph, proc_loader& ld) {
 
 void proc::wake() {
     int s = proc::ps_blocked;
+    log_printf("pid[%d] tgid[%d] waking pid[%d] tgid[%d]\n", current()->id_, current()->tgid_, id_, tg_->tgid_);
     if (pstate_.compare_exchange_strong(s, proc::ps_runnable)) {
         cpus[home_cpuindex_].enqueue(this);
     }
