@@ -519,11 +519,16 @@ int proc::syscall_msleep(regstate* regs) {
 
 int proc::syscall_clone(regstate* regs) {
     uintptr_t stack_top = regs->reg_rdi;
-
     spinlock_guard guard(tg_->thread_list_lock_);
     proc* cloned_thread = nullptr;
     irqstate irqs;
     pid_t pid = -1;
+
+    vmiter it(this, stack_top);
+    if (!it.perm(PTE_P | PTE_U | PTE_W)) {
+        return E_FAULT;
+    }
+
     cloned_thread = knew<proc>();
     if (!cloned_thread) {
         return E_NOMEM;
