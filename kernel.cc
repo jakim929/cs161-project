@@ -538,6 +538,7 @@ int proc::syscall_clone(regstate* regs) {
     }
     ptable_lock.unlock(irqs);
     if (pid < 0) {
+        cloned_thread->thread_links_.erase();
         kfree(cloned_thread);
         return E_AGAIN;
     }
@@ -554,7 +555,7 @@ int proc::syscall_clone(regstate* regs) {
 }
 
 void proc::texit(int status) {
- log_printf("syscall_texit[%d] for pid[%d] tgid[%d]\n", status, id_, tgid_);
+    log_printf("syscall_texit[%d] for pid[%d] tgid[%d]\n", status, id_, tgid_);
 
     bool has_next_thread = false;
     bool has_prev_thread = false;

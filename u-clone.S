@@ -13,6 +13,7 @@ _Z9sys_clonePFiPvES_Pc:
   syscall
 
   testq %rax, %rax
+  jl parent_thread
   jz child_thread
 
 parent_thread:
