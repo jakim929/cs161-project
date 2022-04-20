@@ -525,6 +525,9 @@ int proc::syscall_clone(regstate* regs) {
     irqstate irqs;
     pid_t pid = -1;
     cloned_thread = knew<proc>();
+    if (!cloned_thread) {
+        return E_NOMEM;
+    }
     tg_->thread_list_.push_back(cloned_thread);
     irqs = ptable_lock.lock();
     for (int i = 1; i < NPROC; i++) {
