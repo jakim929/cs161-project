@@ -7,6 +7,7 @@
 #include "k-memrange.hh"
 #include "k-waitstruct.hh"
 #include "k-vfs.hh"
+#include "k-futex.hh"
 #if CHICKADEE_PROCESS
 #error "kernel.hh should not be used by process code."
 #endif
@@ -100,6 +101,8 @@ struct __attribute__((aligned(4096))) proc {
     int syscall_waitpid(regstate* regs);
 
     int syscall_msleep(regstate* regs);
+
+    int syscall_futex(regstate* regs);
 
     int syscall_open(regstate* reg);
 

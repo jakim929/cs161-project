@@ -342,6 +342,10 @@ inline int sys_testfree(void* heap_top, void* stack_bottom) {
     return make_syscall(SYSCALL_TESTFREE, reinterpret_cast<uintptr_t>(heap_top), reinterpret_cast<uintptr_t>(stack_bottom));
 }
 
+inline int sys_futex(void* addr, int futex_op, uint64_t val) {
+    return make_syscall(SYSCALL_FUTEX, reinterpret_cast<uintptr_t>(addr), futex_op, val);
+}
+
 // dprintf(fd, format, ...)
 //    Construct a string from `format` and pass it to `sys_write(fd)`.
 //    Returns the number of characters printed, or E_2BIG if the string

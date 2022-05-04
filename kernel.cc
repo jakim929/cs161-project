@@ -7,6 +7,7 @@
 #include "k-vmiter.hh"
 #include "k-vfs.hh"
 #include "obj/k-firstprocess.h"
+#include "k-futex.hh"
 
 // kernel.cc
 //
@@ -16,6 +17,8 @@
 std::atomic<unsigned long> ticks;
 spinlock timer_lock;
 timingwheel timer_queue;
+
+futex_store global_futex_store;
 
 int total_resume_count = 0;
 
@@ -431,6 +434,9 @@ uintptr_t proc::run_syscall(regstate* regs) {
     case SYSCALL_WAITPID:    
         return syscall_waitpid(regs);
 
+    case SYSCALL_FUTEX:
+        return syscall_futex(regs);
+
     case SYSCALL_DUP2:
         return syscall_dup2(regs);
 
@@ -604,6 +610,27 @@ int proc::syscall_waitpid(regstate* regs) {
     int options = (int) regs->reg_rdx;
 
     return waitpid(pid, stat, options);
+}
+
+int proc::syscall_futex(regstate* regs) {
+    uintptr_t addr = regs->reg_rdi;
+    int futex_op = regs->reg_rsi;
+    int val = regs->reg_rdx;
+
+    // TODO validate parameters, make sure user can acess
+
+    if (futex_op == FUTEX_WAIT) {
+        int* futex_addr = reinterpret_cast<int*>(addr);
+        if (*futex_addr != val) {
+            return 0;
+        }
+        global_futex_store.wait(addr);
+        return 0;
+    } else if (futex_op == FUTEX_WAKE) {
+        global_futex_store.wake_all(addr);
+        return 1;
+    }
+    return 0;
 }
 
 int proc::close_fd(int fd, spinlock_guard& guard) {

@@ -321,6 +321,10 @@ struct path_elements {
 #define SYSCALL_WAITPID         134
 #define SYSCALL_MKDIR           135
 #define SYSCALL_RMDIR           136
+#define SYSCALL_FUTEX           137
+
+#define FUTEX_WAIT              1
+#define FUTEX_WAKE              2
 
 // System call error return values
 
