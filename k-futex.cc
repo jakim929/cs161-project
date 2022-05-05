@@ -9,8 +9,8 @@ void futex_store::wait(uintptr_t addr) {
   f = get_futex(addr, guard);
   if (!f) {
     for (size_t i = 0; i < NFUTEX; i++) {
-      if (list_[i].addr == 0) {
-        list_[i].addr = addr;
+      if (list_[i].addr_ == 0) {
+        list_[i].addr_ = addr;
         assert(list_[i].wq_.q_.empty());
         f = &list_[i];
         break;
@@ -32,14 +32,14 @@ void futex_store::wake_all(uintptr_t addr) {
   
   f->wq_.wake_all();
   assert(f->wq_.q_.empty());
-  f->addr = 0;
+  f->addr_ = 0;
   return;
 }
 
 // TODO: convert to hash table
 futex* futex_store::get_futex(uintptr_t addr, spinlock_guard& guard) {
   for (size_t i = 0; i < NFUTEX; i++) {
-    if (list_[i].addr == addr) {
+    if (list_[i].addr_ == addr) {
       return &list_[i];
     }
   }

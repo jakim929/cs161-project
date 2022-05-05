@@ -322,6 +322,9 @@ struct path_elements {
 #define SYSCALL_MKDIR           135
 #define SYSCALL_RMDIR           136
 #define SYSCALL_FUTEX           137
+#define SYSCALL_SHMGET          138
+#define SYSCALL_SHMAT           139
+#define SYSCALL_SHMDT           140
 
 #define FUTEX_WAIT              1
 #define FUTEX_WAKE              2

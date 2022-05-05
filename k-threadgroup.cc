@@ -1,5 +1,6 @@
 #include "kernel.hh"
 #include "k-wait.hh"
+#include "k-vmiter.hh"
 
 threadgroup* tgtable[NTHREADGROUP];            // array of process descriptor pointers
 spinlock tgtable_lock;
@@ -23,11 +24,19 @@ void threadgroup::init(pid_t tgid, pid_t ppid, x86_64_pagetable* pt) {
   pagetable_ = pt;
   ppid_ = ppid;
   init_fd_table();
+  init_shm_table();
 }
 
 void threadgroup::init_fd_table() {
   for (int i = 0; i < N_FILE_DESCRIPTORS; i++) {
     fd_table_[i] = nullptr;
+  }
+}
+
+void threadgroup::init_shm_table() {
+  for (int i = 0; i < N_PER_PROC_SHMS; i++) {
+    shm_mapping_table_[i].shm_ = nullptr;
+    shm_mapping_table_[i].va_ = 0;
   }
 }
 
@@ -48,12 +57,42 @@ void threadgroup::copy_fd_table_from_threadgroup(threadgroup* tg) {
     }
 }
 
+void threadgroup::copy_shm_mapping_table_from_threadgroup(threadgroup* tg) {
+    spinlock_guard fd_guard(tg->shm_mapping_table_lock_);
+    for (int i = 0; i < N_PER_PROC_SHMS; i++) {
+        shm_mapping* shm_mapping = &tg->shm_mapping_table_[i];
+        if (shm_mapping->shm_ != nullptr && shm_mapping->va_ != 0) {
+            spinlock_guard guard(shm_mapping->shm_->ref_count_lock_);
+            shm_mapping->shm_->ref_count_++;
+            shm_mapping_table_[i].shm_ = shm_mapping->shm_;
+            shm_mapping_table_[i].va_ = shm_mapping->va_;
+        }
+    }
+}
+
 bool threadgroup::is_exited(spinlock_guard &guard) {
   return thread_list_.front() == nullptr;
 }
 
 void threadgroup::exit(int status) {
   
+}
+
+void threadgroup::put_shm(int shmid, spinlock_guard& guard) {
+  shm_mapping* sm = &shm_mapping_table_[shmid];
+  
+  {
+    spinlock_guard global_shm_store_guard(global_shm_store.list_lock_);
+    spinlock_guard ref_count_guard(sm->shm_->ref_count_lock_);
+    sm->shm_->ref_count_--;
+    log_printf("decrementing for %p refcount[%d] %d\n", sm->shm_->kptr_, sm->shm_->ref_count_, sm->shm_->id_);
+    if (sm->shm_->ref_count_ == 0) {
+      global_shm_store.list_[sm->shm_->id_] = nullptr;
+      ref_count_guard.unlock();
+      kfree(sm->shm_->kptr_);
+      kfree(sm->shm_);
+    }
+  }
 }
 
 void threadgroup::exit_cleanup(int status) {
@@ -87,6 +126,8 @@ void threadgroup::exit_cleanup(int status) {
         }
     }
 
+    free_shm_table();
+
     x86_64_pagetable* original_pagetable = pagetable_;
     kfree_all_user_mappings(original_pagetable);
     set_pagetable(early_pagetable);
@@ -101,6 +142,19 @@ void threadgroup::exit_cleanup(int status) {
       spinlock_guard timer_guard(timer_lock);
       parent->interrupt_sleep_ = true;
       timer_queue.wake_all();
+    }
+  }
+}
+
+void threadgroup::free_shm_table() {
+  spinlock_guard shm_mapping_table_guard(shm_mapping_table_lock_);
+  for (int i = 0; i < N_PER_PROC_SHMS; i++) {
+    if (shm_mapping_table_[i].shm_ != nullptr) {
+      if (shm_mapping_table_[i].va_ != 0) {
+        vmiter it(pagetable_, shm_mapping_table_[i].va_);
+        it.unmap();
+      }
+      put_shm(i, shm_mapping_table_guard);
     }
   }
 }

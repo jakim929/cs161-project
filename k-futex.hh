@@ -5,7 +5,7 @@
 
 struct futex {
   wait_queue wq_;
-  uintptr_t addr;
+  uintptr_t addr_;
 };
 
 #define NFUTEX 16

@@ -19,6 +19,7 @@ spinlock timer_lock;
 timingwheel timer_queue;
 
 futex_store global_futex_store;
+shm_store global_shm_store;
 
 int total_resume_count = 0;
 
@@ -437,6 +438,15 @@ uintptr_t proc::run_syscall(regstate* regs) {
     case SYSCALL_FUTEX:
         return syscall_futex(regs);
 
+    case SYSCALL_SHMGET:
+        return syscall_shmget(regs);
+
+    case SYSCALL_SHMAT:
+        return syscall_shmat(regs);
+
+    case SYSCALL_SHMDT:
+        return syscall_shmdt(regs);
+
     case SYSCALL_DUP2:
         return syscall_dup2(regs);
 
@@ -632,6 +642,81 @@ int proc::syscall_futex(regstate* regs) {
     }
     return 0;
 }
+
+int proc::syscall_shmget(regstate* regs) {
+    void* shared_page = kalloc(4096);
+
+    int global_shmid = -1;
+    int shmid = -1;
+
+    shm* shared_mem = knew<shm>();
+    shared_mem->kptr_ = shared_page;
+    {
+        spinlock_guard guard(shared_mem->ref_count_lock_);
+        shared_mem->ref_count_ = 1;
+    }
+    {
+        spinlock_guard guard(global_shm_store.list_lock_);
+        for (int i = 0; i < N_PER_PROC_SHMS; i++) {
+            if (global_shm_store.list_[i] == nullptr) {
+                global_shmid = i;
+                break;
+            }
+        }
+        if (global_shmid >= 0) {
+            global_shm_store.list_[global_shmid] = shared_mem;
+            shared_mem->id_ = global_shmid;
+            log_printf("shmget:: %d || %d\n", shared_mem->kptr_, shared_mem->id_);
+        }
+    }
+
+    if (global_shmid < 0) {
+        // HANDLE FAILURE
+        assert(false);
+    }
+
+    log_printf("shared memory page created at %p\n", shared_page);
+
+    shmid = assign_to_open_shmid(shared_mem);
+    if (shmid < 0) {
+        assert(false);
+    }
+
+    return shmid;
+}
+
+uintptr_t proc::syscall_shmat(regstate* regs) {
+    int shmid = regs->reg_rdi;
+    int shmaddr = regs->reg_rsi;
+
+    // TODO: validate shmaddr and shmid
+
+    shm_mapping* shared_mem = nullptr;
+    {
+        spinlock_guard guard(tg_->shm_mapping_table_lock_);
+        shared_mem = &tg_->shm_mapping_table_[shmid];
+    }
+
+    if (!shared_mem) {
+        assert(false);
+    }
+    
+    if (vmiter(this, shmaddr).try_map(ka2pa(shared_mem->shm_->kptr_), PTE_PWU) < 0) {
+        assert(false);
+    }
+
+    shared_mem->va_ = shmaddr;
+    return shmaddr;
+}
+
+int proc::syscall_shmdt(regstate* regs) {
+    int shmaddr = regs->reg_rdi;
+
+    // TODO: validate shmaddr
+
+    void* kptr = vmiter(this, shmaddr).kptr();
+}
+
 
 int proc::close_fd(int fd, spinlock_guard& guard) {
     file* open_file = tg_->fd_table_[fd];
@@ -853,6 +938,32 @@ int proc::syscall_dup2(regstate* regs) {
         tg_->fd_table_[newfd] = file_to_dup;
     }
     return newfd;
+}
+
+
+int proc::assign_to_open_shmid(shm* s) {
+    spinlock_guard guard(tg_->fd_table_lock_);
+    return assign_to_open_shmid(s, guard);
+}
+
+int proc::assign_to_open_shmid(shm* s, spinlock_guard& guard) {
+    int open_shmid = get_open_fd(guard);
+    if (open_shmid < 0) {
+        return -1;
+    }
+    tg_->shm_mapping_table_[open_shmid].shm_ = s;
+
+
+    return open_shmid;
+}
+
+int proc::get_open_shmid(spinlock_guard& guard) {
+    for (int i = 0; i < N_PER_PROC_SHMS; i++) {
+        if (tg_->shm_mapping_table_[i].shm_ == nullptr) {
+            return i;
+        }
+    }
+    return -1;
 }
 
 int proc::get_open_fd(spinlock_guard& guard) {
@@ -1205,6 +1316,7 @@ int proc::syscall_execv(regstate* regs) {
 
     set_pagetable(new_pagetable);
 
+    tg_->free_shm_table();
     kfree_all_user_mappings(old_pagetable);
     kfree_pagetable(old_pagetable);
 
@@ -1255,7 +1367,7 @@ int proc::syscall_fork(regstate* regs) {
     if (tgid >= 0) {
         tgtable[tgid] = child_tg;
     }
-    tgtable_lock.unlock(irqs);    
+    tgtable_lock.unlock(irqs);
 
     if (tgid < 0) {
         log_printf("fork_failed: tgid < 0 \n");
@@ -1330,6 +1442,34 @@ int proc::syscall_fork(regstate* regs) {
     }
 
     assert(tg_);
+
+
+    child_tg->copy_shm_mapping_table_from_threadgroup(tg_);
+    // If there are any shared pages, remove existing mapping and map to shared memory location
+    {
+        spinlock_guard guard(tg_->shm_mapping_table_lock_);
+        for (int i = 0; i < N_PER_PROC_SHMS; i++) {
+            if (tg_->shm_mapping_table_[i].va_ != 0 && tg_->shm_mapping_table_[i].shm_ != nullptr) {
+                vmiter it(child_tg->pagetable_, tg_->shm_mapping_table_[i].va_);
+                it.kfree_page();
+            }
+        }
+    }
+    {
+        spinlock_guard guard(child_tg->shm_mapping_table_lock_);
+        for (int i = 0; i < N_PER_PROC_SHMS; i++) {
+            if (child_tg->shm_mapping_table_[i].va_ != 0 && child_tg->shm_mapping_table_[i].shm_ != nullptr) {
+                vmiter it(child_tg->pagetable_, child_tg->shm_mapping_table_[i].va_);
+                vmiter parent_it(tg_->pagetable_, child_tg->shm_mapping_table_[i].va_);
+                log_printf("BEFORE %p\n", child_tg->shm_mapping_table_[i].shm_);
+                log_printf("about to map %p => %p\n", child_tg->shm_mapping_table_[i].va_, child_tg->shm_mapping_table_[i].shm_->kptr_);
+                if (it.try_map(child_tg->shm_mapping_table_[i].shm_->kptr_, parent_it.perm()) < 0) {
+                    assert(false);
+                }
+            }
+
+        }
+    }
 
     // copy over file descriptor table from parent
     child_tg->copy_fd_table_from_threadgroup(tg_);
@@ -1408,52 +1548,6 @@ void proc::syscall_exit(regstate* regs) {
 
     }
     syscall_texit(regs);
-
-    // proc* parent = nullptr;
-    // // Remove current process from process table
-    // {
-    //     auto irqs = ptable_lock.lock();
-    //     // ptable[id_] = nullptr;
-    //     parent = ptable[tg_->ppid_];
-    //     ptable_lock.unlock(irqs);
-    //     spinlock_guard guard(process_hierarchy_lock);
-
-    //     log_printf("exiting process %d\n", id_);
-
-    //     threadgroup* child = tg_->children_list_.pop_front();
-    //     while (child) {
-    //         log_printf("iter start %d\n", child->tgid_);
-    //         child->ppid_ = 1;
-    //         tgtable[1]->children_list_.push_back(child);
-
-    //         log_printf("proc[%d] reassigned %d to parent\n", id_, child->tgid_);
-    //         child = tg_->children_list_.pop_front();
-    //     }
-
-    //     {
-    //         spinlock_guard fd_table_guard(tg_->fd_table_lock_);
-    //         for (int i = 0; i < N_FILE_DESCRIPTORS; i++) {
-    //             if (tg_->fd_table_[i]) {
-    //                 close_fd(i, fd_table_guard);
-    //             }
-    //         }
-    //     }
-
-    //     x86_64_pagetable* original_pagetable = pagetable_;
-    //     kfree_all_user_mappings(original_pagetable);
-    //     set_pagetable(early_pagetable);
-    //     kfree_pagetable(original_pagetable);
-    //     pagetable_ = early_pagetable;
-    //     pstate_ = ps_exited;
-    //     parent->wq_.wake_all();
-    //     // {
-    //     //     spinlock_guard timer_guard(timer_lock);
-    //     //     parent->interrupt_sleep_ = true;
-    //     //     timer_queue.wake_all();
-    //     // }
-    // }
-
-    // yield_noreturn();
 }
 
 

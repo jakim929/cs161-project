@@ -273,6 +273,11 @@ inline void vmiter::map(void* kp, int perm) {
 inline void vmiter::map(volatile void* kp, int perm) {
     map(kptr2pa(kp), perm);
 }
+
+inline void vmiter::unmap() {
+    assert((va_ & (PAGESIZE - 1)) == 0);
+    *pep_ = 0;
+}
 inline void vmiter::kfree_page() {
     assert((va_ & (PAGESIZE - 1)) == 0);
     if (*pep_ & PTE_P) {

@@ -8,6 +8,7 @@
 #include "k-waitstruct.hh"
 #include "k-vfs.hh"
 #include "k-futex.hh"
+#include "k-shm.hh"
 #if CHICKADEE_PROCESS
 #error "kernel.hh should not be used by process code."
 #endif
@@ -30,7 +31,10 @@ struct timingwheel;
 extern file* open_file_table[N_GLOBAL_OPEN_FILES];
 extern spinlock open_file_table_lock;
 
+extern shm_store global_shm_store;
+
 #define N_FILE_DESCRIPTORS 32
+#define N_PER_PROC_SHMS 32
 // Process descriptor type
 struct __attribute__((aligned(4096))) proc {
     enum pstate_t {
@@ -104,6 +108,10 @@ struct __attribute__((aligned(4096))) proc {
 
     int syscall_futex(regstate* regs);
 
+    int syscall_shmget(regstate* regs);
+    uintptr_t syscall_shmat(regstate* regs);
+    int syscall_shmdt(regstate* regs);
+
     int syscall_open(regstate* reg);
 
     uintptr_t syscall_read(regstate* reg);
@@ -123,6 +131,10 @@ struct __attribute__((aligned(4096))) proc {
     int get_open_fd(spinlock_guard& guard);
     int assign_to_open_fd(file* f);
     int assign_to_open_fd(file* f, spinlock_guard& guard);
+
+    int get_open_shmid(spinlock_guard& guard);
+    int assign_to_open_shmid(shm* s);
+    int assign_to_open_shmid(shm* s, spinlock_guard& guard);
 
     int get_available_open_file_table_id(spinlock_guard& guard);
     int add_to_open_file_table(file* f);
@@ -157,6 +169,10 @@ struct __attribute__((aligned(4096))) threadgroup {
     x86_64_pagetable* pagetable_ = nullptr;    // Process's page table
     file* fd_table_[N_FILE_DESCRIPTORS];
     spinlock fd_table_lock_;
+    
+    shm_mapping shm_mapping_table_[N_PER_PROC_SHMS];
+    spinlock shm_mapping_table_lock_;
+
     list_links sibling_links_;
     list<threadgroup, &threadgroup::sibling_links_> children_list_;
 
@@ -175,8 +191,16 @@ struct __attribute__((aligned(4096))) threadgroup {
     void init(pid_t tgid, pid_t ppid, x86_64_pagetable* pt);
     static pid_t assign_to_empty_tgid(spinlock_guard &guard, threadgroup* tg);
     void init_fd_table();
+    void init_shm_table();
+
     void add_proc_to_thread_list(proc* p);
     void copy_fd_table_from_threadgroup(threadgroup* tg);
+
+    void copy_shm_mapping_table_from_threadgroup(threadgroup* tg);
+
+    void put_shm(int shmid, spinlock_guard& guard);
+
+    void free_shm_table();
 
     threadgroup* get_child(pid_t tgid, spinlock_guard &process_hierarchy_lock);
     threadgroup* get_any_exited_child(spinlock_guard &process_hierarchy_lock);

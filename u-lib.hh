@@ -346,6 +346,18 @@ inline int sys_futex(void* addr, int futex_op, uint64_t val) {
     return make_syscall(SYSCALL_FUTEX, reinterpret_cast<uintptr_t>(addr), futex_op, val);
 }
 
+inline int sys_shmget() {
+    return make_syscall(SYSCALL_SHMGET);
+}
+
+inline uintptr_t sys_shmat(int shmid, void* shmaddr) {
+    return make_syscall(SYSCALL_SHMAT, shmid, reinterpret_cast<uintptr_t>(shmaddr));
+}
+
+inline uintptr_t sys_shmdt(void* shmaddr) {
+    return make_syscall(SYSCALL_SHMDT, reinterpret_cast<uintptr_t>(shmaddr));
+} 
+
 // dprintf(fd, format, ...)
 //    Construct a string from `format` and pass it to `sys_write(fd)`.
 //    Returns the number of characters printed, or E_2BIG if the string
