@@ -50,7 +50,6 @@ KERNEL_OBJS = $(OBJDIR)/k-exception.ko \
 	$(OBJDIR)/k-timingwheel.ko \
 	$(OBJDIR)/k-vfs.ko \
 	$(OBJDIR)/k-futex.ko \
-	$(OBJDIR)/k-shm.ko \
 	$(OBJDIR)/k-alloc.ko $(OBJDIR)/k-vmiter.ko $(OBJDIR)/k-devices.ko \
 	$(OBJDIR)/k-init.ko $(OBJDIR)/k-hardware.ko $(OBJDIR)/k-mpspec.ko \
 	$(OBJDIR)/crc32c.ko \
