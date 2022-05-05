@@ -16,7 +16,7 @@ struct futex_store {
 
   futex* get_futex(uintptr_t addr, spinlock_guard &guard);
 
-  void wake_n(uintptr_t addr);
+  void wake_n(uintptr_t addr, size_t n);
   void wake_all(uintptr_t addr);
   void wake_one(uintptr_t addr);
 

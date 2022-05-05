@@ -47,7 +47,7 @@ struct wait_queue {
     // you might want to provide some convenience methods here
     inline void wake_all();
     inline void wake_one();
-    inline void wake_all_for_tgid(pid_t tgid);
+    inline void wake_n(size_t n);
 };
 
 #endif

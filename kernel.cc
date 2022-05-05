@@ -637,7 +637,8 @@ int proc::syscall_futex(regstate* regs) {
         global_futex_store.wait(addr);
         return 0;
     } else if (futex_op == FUTEX_WAKE) {
-        global_futex_store.wake_(addr);
+        // global_futex_store.wake_n(addr, val);
+        global_futex_store.wake_all(addr);
         return 1;
     }
     return 0;

@@ -137,7 +137,7 @@ static void test_sum(int (*func)(void*)) {
     sys_clone(func, &args, stack3 + PAGESIZE);
     sys_clone(func, &args, stack4 + PAGESIZE);
 
-    sys_msleep(10000);
+    sys_msleep(5000);
     console_printf("Sum result! %d\n", args.sum);
 
     sys_texit(0);

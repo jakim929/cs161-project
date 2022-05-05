@@ -106,6 +106,17 @@ inline void wait_queue::wake_all() {
     }
 }
 
+inline void wait_queue::wake_n(size_t n) {
+    spinlock_guard guard(lock_);
+    while (auto w = q_.pop_front()) {
+        w->wake();
+        n--;
+        if (n == 0) {
+            break;
+        }
+    }
+}
+
 inline void wait_queue::wake_one() {
     spinlock_guard guard(lock_);
     auto w = q_.pop_front();
@@ -116,21 +127,6 @@ inline void waiter::block_until_woken(wait_queue& wq) {
     prepare(wq);
     block();
     clear();
-}
-
-inline void wait_queue::wake_all_for_tgid(pid_t tgid) {
-    spinlock_guard guard(lock_);
-    waiter* w = q_.front();
-    while(w) {
-        if (w->p_->tgid_ == tgid) {
-            waiter* to_wake = w;
-            w = q_.next(w);
-            to_wake->links_.erase();
-            to_wake->wake();
-        } else {
-            w = q_.next(w);
-        }
-    }
 }
 
 #endif

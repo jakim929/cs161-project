@@ -23,6 +23,20 @@ void futex_store::wait(uintptr_t addr) {
   waiter().block_until_woken(f->wq_);
 }
 
+void futex_store::wake_n(uintptr_t addr, size_t n) {
+  spinlock_guard guard(list_lock_);
+  futex* f = get_futex(addr, guard);
+  if (!f) {
+    return;
+  }
+  
+  f->wq_.wake_n(n);
+  if (f->wq_.q_.empty()) {
+    f->addr_ = 0;
+  }
+  return;
+}
+
 void futex_store::wake_all(uintptr_t addr) {
   spinlock_guard guard(list_lock_);
   futex* f = get_futex(addr, guard);
