@@ -36,6 +36,20 @@ void futex_store::wake_all(uintptr_t addr) {
   return;
 }
 
+void futex_store::wake_one(uintptr_t addr) {
+  spinlock_guard guard(list_lock_);
+  futex* f = get_futex(addr, guard);
+  if (!f) {
+    return;
+  }
+  
+  f->wq_.wake_one();
+  if (f->wq_.q_.empty()) {
+    f->addr_ = 0;
+  }
+  return;
+}
+
 // TODO: convert to hash table
 futex* futex_store::get_futex(uintptr_t addr, spinlock_guard& guard) {
   for (size_t i = 0; i < NFUTEX; i++) {

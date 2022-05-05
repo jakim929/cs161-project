@@ -16,10 +16,10 @@ struct shm_mapping {
   shm* shm_;
 };
 
-#define NSHM 16
+#define N_GLOBAL_SHM 16
 
 struct shm_store {
-  shm* list_[NSHM];
+  shm* list_[N_GLOBAL_SHM];
   spinlock list_lock_;
 };
 

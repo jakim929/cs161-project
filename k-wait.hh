@@ -106,6 +106,12 @@ inline void wait_queue::wake_all() {
     }
 }
 
+inline void wait_queue::wake_one() {
+    spinlock_guard guard(lock_);
+    auto w = q_.pop_front();
+    w->wake();
+}
+
 inline void waiter::block_until_woken(wait_queue& wq) {
     prepare(wq);
     block();

@@ -18,6 +18,7 @@ struct futex_store {
 
   void wake_n(uintptr_t addr);
   void wake_all(uintptr_t addr);
+  void wake_one(uintptr_t addr);
 
   void wait(uintptr_t addr);
 };

@@ -637,7 +637,7 @@ int proc::syscall_futex(regstate* regs) {
         global_futex_store.wait(addr);
         return 0;
     } else if (futex_op == FUTEX_WAKE) {
-        global_futex_store.wake_all(addr);
+        global_futex_store.wake_(addr);
         return 1;
     }
     return 0;
@@ -657,7 +657,7 @@ int proc::syscall_shmget(regstate* regs) {
     }
     {
         spinlock_guard guard(global_shm_store.list_lock_);
-        for (int i = 0; i < N_PER_PROC_SHMS; i++) {
+        for (int i = 0; i < N_GLOBAL_SHM; i++) {
             if (global_shm_store.list_[i] == nullptr) {
                 global_shmid = i;
                 break;
