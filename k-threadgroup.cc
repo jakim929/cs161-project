@@ -107,8 +107,6 @@ void threadgroup::exit_cleanup(int status) {
     threadgroup* parent = tgtable[ppid_];
     tgtable_guard.unlock();
 
-
-
     threadgroup* child = children_list_.pop_front();
     while (child) {
         child->ppid_ = 1;

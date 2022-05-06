@@ -28,7 +28,9 @@ void process_main() {
     sys_yield();
 
     console_printf("Shared value : %d\n", *shared_val);
-    assert(unshared_val == 10);
+    assert_eq(unshared_val, 10);
+    assert_eq(*shared_val, 15);
     assert_gt(shmid, 0);
+    console_printf("testshm successful\n");
     sys_exit(1);
 }

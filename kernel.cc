@@ -585,8 +585,6 @@ void proc::texit(int status) {
     bool has_prev_thread = false;
     bool is_last_thread = false;
     {
-
-        // TODO: Move the ptable_lock outside so 
         spinlock_guard ptable_guard(ptable_lock);
         spinlock_guard thread_list_guard(tg_->thread_list_lock_);
         has_next_thread = tg_->thread_list_.next(this) != nullptr;
@@ -628,6 +626,15 @@ int proc::syscall_futex(regstate* regs) {
     int val = regs->reg_rdx;
 
     // TODO validate parameters, make sure user can acess
+
+    if (futex_op != FUTEX_WAIT && futex_op != FUTEX_WAKE) {
+        return E_FAULT;
+    }
+
+    vmiter it(this, addr);
+    if (!it.range_perm(4096, PTE_P | PTE_U | PTE_W)) {
+        return E_FAULT;
+    }
 
     if (futex_op == FUTEX_WAIT) {
         global_futex_store.wait(addr, val);
@@ -685,7 +692,9 @@ uintptr_t proc::syscall_shmat(regstate* regs) {
     int shmid = regs->reg_rdi;
     uintptr_t shmaddr = regs->reg_rsi;
 
-    // TODO: validate shmaddr and shmid
+    if (shmid < 0 || shmid >= N_PER_PROC_SHMS) {
+        return E_FAULT;
+    }
 
     shm_mapping* shared_mem = nullptr;
     {
@@ -706,11 +715,8 @@ uintptr_t proc::syscall_shmat(regstate* regs) {
 }
 
 int proc::syscall_shmdt(regstate* regs) {
-    uintptr_t shmaddr = regs->reg_rdi;
-
-    // TODO: validate shmaddr
-
-    void* kptr = vmiter(this, shmaddr).kptr();
+    // TODO: unimplemented yet.
+    return 0;
 }
 
 
@@ -719,8 +725,6 @@ int proc::close_fd(int fd, spinlock_guard& guard) {
     if (!open_file) {
         return E_BADF;
     }
-
-    // log_printf("CLOSING fd %d\n", fd);
 
     tg_->fd_table_[fd] = nullptr;
     {
@@ -938,7 +942,7 @@ int proc::syscall_dup2(regstate* regs) {
 
 
 int proc::assign_to_open_shmid(shm* s) {
-    spinlock_guard guard(tg_->fd_table_lock_);
+    spinlock_guard guard(tg_->shm_mapping_table_lock_);
     return assign_to_open_shmid(s, guard);
 }
 

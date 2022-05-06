@@ -57,7 +57,7 @@ static int thread1a(void* x) {
     message("starting thread1a");
 
     wait_on_futex_value((int*) &test_val, 1, 2);
-        message("thread1a waking up!!\n");
+    message("thread1a waking up!!\n");
 
     int expected = 2;
     int new_val = 3;
@@ -111,5 +111,6 @@ void process_main() {
     console_printf("child no = %d\n", p);
     pid_t ch = sys_waitpid(p);
     assert_eq(ch, p);
+    console_printf("Basic test futex finished\n");
     sys_exit(0);
 }
