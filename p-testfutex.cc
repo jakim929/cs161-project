@@ -66,7 +66,6 @@ static int thread1a(void* x) {
 
 static int thread1b(void*) {
     int pid = sys_gettid();
-    assert_eq(pid, 5);
     message("starting thread1b, about to start sleeping");
     sys_msleep(1000);
     message("waking from sleep, setting value to 2");
