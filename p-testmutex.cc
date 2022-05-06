@@ -152,7 +152,6 @@ void process_main() {
       test_sum(add_to_unlocked_shared_value);
     }
     pid_t ch = sys_waitpid(p);
-    assert_eq(ch, p);
 
     p = sys_fork();
     assert_ge(p, 0);
@@ -161,7 +160,6 @@ void process_main() {
       test_sum(add_to_locked_shared_value);
     }
     ch = sys_waitpid(p);
-    assert_eq(ch, p);
     console_printf("testmutex done!");
     sys_exit(0);
 }
