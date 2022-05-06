@@ -70,22 +70,22 @@ static int add_to_locked_shared_value(void* x) {
 
     function_args* arg = (function_args*) x;
 
-    // console_printf("starting %d\n", pid);
+    console_printf("starting %d\n", pid);
+
     for (int i = 0; i < 100000; i++) {
       arg->lock.lock();
-
       int j = arg->sum + 1;
       int k = 0;
       // spin for a small but different amount of time per thread
       // trying to increase chance of race condition by making critical section wider
-      while(k < 50 - pid) {
+      while(k < 100 - pid) {
         k++;
       }
       arg->sum = j;
       arg->lock.unlock();
-
     }
-    // console_printf("exiting %d \n", pid);
+
+    console_printf("exiting %d \n", pid);
     sys_texit(0);
 }
 
@@ -94,17 +94,17 @@ static int add_to_unlocked_shared_value(void* x) {
 
     function_args* arg = (function_args*) x;
 
-    // console_printf("starting %d\n", pid);
+    console_printf("starting %d\n", pid);
     for (int i = 0; i < 100000; i++) {
       int j = arg->sum + 1;
       int k = 0;
       // spin for a small but different amount of time per thread
-      while(k < 50 - pid) {
+      while(k < 100 - pid) {
         k++;
       }
       arg->sum = j;
     }
-    // console_printf("exiting %d \n", pid);
+    console_printf("exiting %d \n", pid);
     sys_texit(0);
 }
 
@@ -137,7 +137,7 @@ static void test_sum(int (*func)(void*)) {
     sys_clone(func, &args, stack3 + PAGESIZE);
     sys_clone(func, &args, stack4 + PAGESIZE);
 
-    sys_msleep(5000);
+    sys_msleep(10000);
     console_printf("Sum result! %d\n", args.sum);
 
     sys_texit(0);

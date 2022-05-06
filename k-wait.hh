@@ -106,6 +106,12 @@ inline void wait_queue::wake_all() {
     }
 }
 
+inline void wait_queue::wake_all(spinlock_guard& guard) {
+    while (auto w = q_.pop_front()) {
+        w->wake();
+    }
+}
+
 inline void wait_queue::wake_n(size_t n) {
     spinlock_guard guard(lock_);
     while (auto w = q_.pop_front()) {
@@ -120,12 +126,23 @@ inline void wait_queue::wake_n(size_t n) {
 inline void wait_queue::wake_one() {
     spinlock_guard guard(lock_);
     auto w = q_.pop_front();
-    w->wake();
+    if (w) {
+        w->wake();
+    }
 }
 
-inline void waiter::block_until_woken(wait_queue& wq) {
+inline void wait_queue::wake_one(spinlock_guard& guard) {
+    auto w = q_.pop_front();
+    if (w) {
+        w->wake();
+    }
+}
+
+inline void waiter::block_until_woken(wait_queue& wq, spinlock_guard& guard) {
     prepare(wq);
+    guard.unlock();
     block();
+    guard.lock();
     clear();
 }
 

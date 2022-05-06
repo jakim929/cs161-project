@@ -126,10 +126,6 @@ void cpustate::schedule(proc* yielding_from) {
         current_->texit(current_->tg_->process_exit_status_);
 
     }
-    if (current_->id_ >= 0) {
-    log_printf("scheduling %d to %d\n", current_->id_, cpuindex_);
-
-    }
     current_->resume_count_++;
     current_->resume(); // does not return
 }

@@ -26,7 +26,7 @@ struct waiter {
     inline void wake();
 
 
-    inline void block_until_woken(wait_queue& wq);
+    inline void block_until_woken(wait_queue& wq, spinlock_guard& guard);
 
     template <typename F>
     inline void block_until(wait_queue& wq, F predicate);
@@ -46,7 +46,10 @@ struct wait_queue {
 
     // you might want to provide some convenience methods here
     inline void wake_all();
+    inline void wake_all(spinlock_guard& guard);
+
     inline void wake_one();
+    inline void wake_one(spinlock_guard& guard);
     inline void wake_n(size_t n);
 };
 

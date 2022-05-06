@@ -630,15 +630,10 @@ int proc::syscall_futex(regstate* regs) {
     // TODO validate parameters, make sure user can acess
 
     if (futex_op == FUTEX_WAIT) {
-        int* futex_addr = reinterpret_cast<int*>(addr);
-        if (*futex_addr != val) {
-            return 0;
-        }
-        global_futex_store.wait(addr);
+        global_futex_store.wait(addr, val);
         return 0;
     } else if (futex_op == FUTEX_WAKE) {
-        // global_futex_store.wake_n(addr, val);
-        global_futex_store.wake_all(addr);
+        global_futex_store.wake_n(addr, val);
         return 1;
     }
     return 0;
@@ -688,7 +683,7 @@ int proc::syscall_shmget(regstate* regs) {
 
 uintptr_t proc::syscall_shmat(regstate* regs) {
     int shmid = regs->reg_rdi;
-    int shmaddr = regs->reg_rsi;
+    uintptr_t shmaddr = regs->reg_rsi;
 
     // TODO: validate shmaddr and shmid
 
@@ -711,7 +706,7 @@ uintptr_t proc::syscall_shmat(regstate* regs) {
 }
 
 int proc::syscall_shmdt(regstate* regs) {
-    int shmaddr = regs->reg_rdi;
+    uintptr_t shmaddr = regs->reg_rdi;
 
     // TODO: validate shmaddr
 
