@@ -1531,7 +1531,6 @@ int proc::syscall_fork(regstate* regs) {
 
 void proc::syscall_exit(regstate* regs) {
     exit_status_ = (int) regs->reg_rdi;
-    log_printf("EXITING syscall_exit status [%d] for tgid[%d] pid[%d]\n", regs->reg_rdi, tgid_, id_);
     tg_->should_exit_ = true;
     tg_->process_exit_status_ = exit_status_;
     {

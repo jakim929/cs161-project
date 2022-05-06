@@ -3,8 +3,8 @@ CS 161 Problem Set 5 Collaboration
 
 Collaborators
 -------------
-(Other students you worked with)
+Asher Noel
 
 Citations
 ---------
-(Other sources consulted)
+https://eli.thegreenplace.net/2018/basics-of-futexes

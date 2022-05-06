@@ -131,6 +131,7 @@ void threadgroup::exit_cleanup(int status) {
     x86_64_pagetable* original_pagetable = pagetable_;
     kfree_all_user_mappings(original_pagetable);
     set_pagetable(early_pagetable);
+
     kfree_pagetable(original_pagetable);
     pagetable_ = early_pagetable;
     process_exit_status_ = status;

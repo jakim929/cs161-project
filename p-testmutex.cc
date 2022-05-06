@@ -70,7 +70,7 @@ static int add_to_locked_shared_value(void* x) {
 
     function_args* arg = (function_args*) x;
 
-    console_printf("starting %d\n", pid);
+    console_printf("starting pid[%d]\n", pid);
 
     for (int i = 0; i < 100000; i++) {
       arg->lock.lock();
@@ -85,7 +85,7 @@ static int add_to_locked_shared_value(void* x) {
       arg->lock.unlock();
     }
 
-    console_printf("exiting %d \n", pid);
+    console_printf("exiting pid[%d] \n", pid);
     sys_texit(0);
 }
 
@@ -94,7 +94,7 @@ static int add_to_unlocked_shared_value(void* x) {
 
     function_args* arg = (function_args*) x;
 
-    console_printf("starting %d\n", pid);
+    console_printf("starting pid[%d]\n", pid);
     for (int i = 0; i < 100000; i++) {
       int j = arg->sum + 1;
       int k = 0;
@@ -104,7 +104,7 @@ static int add_to_unlocked_shared_value(void* x) {
       }
       arg->sum = j;
     }
-    console_printf("exiting %d \n", pid);
+    console_printf("exiting pid[%d] \n", pid);
     sys_texit(0);
 }
 
